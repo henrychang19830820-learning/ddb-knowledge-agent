@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DDB Knowledge Agent</title>
+    <style>
+        :root {
+            --bg-color: #f4f7f6;
+            --chat-bg: #ffffff;
+            --user-bubble: #007bff;
+            --ai-bubble: #e9ecef;
+            --text-main: #333;
+            --text-light: #666;
+            --border: #dee2e6;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: var(--chat-bg);
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            z-index: 10;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        #ingest-btn, .danger-btn {
+            border: none;
+            padding: 0.5rem 0.8rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: opacity 0.2s;
+            color: white;
+        }
+
+        #ingest-btn {
+            background-color: #28a745;
+        }
+
+        .danger-btn {
+            background-color: #dc3545;
+        }
+
+        #ingest-btn:hover, .danger-btn:hover {
+            opacity: 0.9;
+        }
+
+        #ingest-btn:disabled, .danger-btn:disabled {
+            background-color: var(--text-light);
+            cursor: not-allowed;
+        }
+
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 0.8rem 1.2rem;
+            border-radius: 1rem;
+            line-height: 1.5;
+            font-size: 0.95rem;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background-color: var(--user-bubble);
+            color: white;
+            border-bottom-right-radius: 0.2rem;
+        }
+
+        .ai-message {
+            align-self: flex-start;
+            background-color: var(--ai-bubble);
+            color: var(--text-main);
+            border-bottom-left-radius: 0.2rem;
+        }
+
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .typing {
+            font-style: italic;
+            color: var(--text-light);
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+
+        footer {
+            background-color: var(--chat-bg);
+            padding: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 0.8rem;
+        }
+
+        #question-input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 2rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #question-input:focus {
+            border-color: var(--user-bubble);
+        }
+
+        #send-btn {
+            background-color: var(--user-bubble);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        #send-btn:hover {
+            background-color: #0056b3;
+        }
+
+        #send-btn:disabled {
+            background-color: var(--border);
+            cursor: not-allowed;
+        }
+
+        /* Markdown-ish formatting for AI responses */
+        .ai-message pre {
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 0.4rem;
+            margin: 0.5rem 0;
+            overflow-x: auto;
+            font-size: 0.85rem;
+        }
+
+        .ai-message code {
+            background: rgba(0,0,0,0.05);
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.2rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>DDB Knowledge Agent</h1>
+        <div class="header-actions">
+            <button id="ingest-btn" title="Repopulate knowledge base from docs">Ingest Docs</button>
+            <button id="clear-docs-btn" class="danger-btn" title="Delete all documents from knowledge base">Clear Docs</button>
+            <button id="clear-cache-btn" class="danger-btn" title="Delete all cached responses">Clear Cache</button>
+        </div>
+    </header>
+
+    <main id="chat-container">
+        <div class="message ai-message">
+            Hello! I'm your DynamoDB expert. How can I help you today?
+        </div>
+    </main>
+
+    <footer>
+        <input type="text" id="question-input" placeholder="Ask a question about DynamoDB..." autocomplete="off">
+        <button id="send-btn">Send</button>
+    </footer>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const questionInput = document.getElementById('question-input');
+        const sendBtn = document.getElementById('send-btn');
+        const ingestBtn = document.getElementById('ingest-btn');
+        const clearDocsBtn = document.getElementById('clear-docs-btn');
+        const clearCacheBtn = document.getElementById('clear-cache-btn');
+
+        async function triggerIngestion() {
+            if (!confirm('This will re-process all DynamoDB documentation. Are you sure?')) return;
+
+            ingestBtn.disabled = true;
+            ingestBtn.innerText = 'Ingesting...';
+            addMessage('System: Ingestion process started. This may take a minute...', false);
+
+            try {
+                const response = await fetch('/ingest', { method: 'POST' });
+                const result = await response.text();
+                addMessage(`System: ${result}`, false);
+            } catch (error) {
+                addMessage(`System Error: ${error.message}`, false, true);
+            } finally {
+                ingestBtn.disabled = false;
+                ingestBtn.innerText = 'Ingest Docs';
+            }
+        }
+
+        async function clearDocs() {
+            if (!confirm('This will delete ALL vectorized documentation from the database. Are you sure?')) return;
+            try {
+                const response = await fetch('/docs', { method: 'DELETE' });
+                const result = await response.text();
+                addMessage(`System: ${result}`, false);
+            } catch (error) {
+                addMessage(`System Error: ${error.message}`, false, true);
+            }
+        }
+
+        async function clearCache() {
+            if (!confirm('This will delete all cached responses. Are you sure?')) return;
+            try {
+                const response = await fetch('/cache', { method: 'DELETE' });
+                const result = await response.text();
+                addMessage(`System: ${result}`, false);
+            } catch (error) {
+                addMessage(`System Error: ${error.message}`, false, true);
+            }
+        }
+
+        ingestBtn.addEventListener('click', triggerIngestion);
+        clearDocsBtn.addEventListener('click', clearDocs);
+        clearCacheBtn.addEventListener('click', clearCache);
+
+        function addMessage(text, isUser = false, isError = false) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isUser ? 'user-message' : 'ai-message'} ${isError ? 'error-message' : ''}`;
+            
+            // Simple text rendering. If you want full markdown support, you could add a library like marked.js
+            // But for now, we'll keep it Vanilla and do basic line break handling.
+            msgDiv.innerText = text;
+            
+            chatContainer.appendChild(msgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return msgDiv;
+        }
+
+        async function askQuestion() {
+            const question = questionInput.value.trim();
+            if (!question) return;
+
+            // Clear input and disable
+            questionInput.value = '';
+            questionInput.disabled = true;
+            sendBtn.disabled = true;
+
+            // Add user message
+            addMessage(question, true);
+
+            // Create AI bubble for streaming
+            const aiMsgDiv = addMessage('', false);
+            aiMsgDiv.innerText = '...';
+
+            const eventSource = new EventSource(`/ask-stream?question=${encodeURIComponent(question)}`);
+            
+            eventSource.addEventListener('token', (event) => {
+                if (aiMsgDiv.innerText === '...') aiMsgDiv.innerText = '';
+                aiMsgDiv.innerText += event.data;
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            });
+
+            eventSource.addEventListener('complete', () => {
+                eventSource.close();
+                questionInput.disabled = false;
+                sendBtn.disabled = false;
+                questionInput.focus();
+            });
+
+            eventSource.addEventListener('error', (event) => {
+                console.error('SSE Error:', event);
+                if (aiMsgDiv.innerText === '...') {
+                    aiMsgDiv.innerText = 'Error: Failed to get response from server.';
+                    aiMsgDiv.classList.add('error-message');
+                }
+                eventSource.close();
+                questionInput.disabled = false;
+                sendBtn.disabled = false;
+                questionInput.focus();
+            });
+        }
+
+        sendBtn.addEventListener('click', askQuestion);
+        questionInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') askQuestion();
+        });
+
+        questionInput.focus();
+    </script>
+</body>
+</html>

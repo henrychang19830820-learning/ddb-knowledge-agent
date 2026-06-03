@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ddb_agent
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  pgweb:
+    image: sosedoff/pgweb
+    ports:
+      - "5433:8081"
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres:5432/ddb_agent?sslmode=disable
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
