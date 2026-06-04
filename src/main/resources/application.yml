@@ -34,4 +34,4 @@ agent:
     # Threshold for semantic cache hit (1.0 is exact match)
     semantic-threshold: 0.92
   ingest:
-    docs-path: ${INGEST_DOCS_PATH:/home/localdev/projects/amazon-dynamodb-developer-guide/doc_source}
+    docs-path: ${INGEST_DOCS_PATH:/home/localdev/projects/ddb-knowledge-agent/local_test_docs}
