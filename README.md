@@ -16,6 +16,12 @@ Run the following command to start PostgreSQL with `pgvector` and the `pgweb` UI
 docker-compose up -d
 ```
 
+To stop the infrastructure:
+
+```bash
+docker-compose down
+```
+
 * **Database:** `localhost:5432` (User: `user`, Password: `password`, DB: `ddb_agent`)
 * **Database UI:** [http://localhost:5433](http://localhost:5433)
 
