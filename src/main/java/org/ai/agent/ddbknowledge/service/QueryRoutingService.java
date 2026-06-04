@@ -29,8 +29,8 @@ public class QueryRoutingService {
     private final ChatLanguageModel chatModel;
     private final StreamingChatLanguageModel streamingChatModel;
     private final EmbeddingModel embeddingModel;
-    private final EmbeddingStore<TextSegment> knowledgeStore;
     private final EmbeddingStore<TextSegment> cacheStore;
+    private final HybridSearchService hybridSearchService;
 
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
@@ -38,19 +38,19 @@ public class QueryRoutingService {
     public QueryRoutingService(ChatLanguageModel chatModel,
                               StreamingChatLanguageModel streamingChatModel,
                               EmbeddingModel embeddingModel,
-                              @Qualifier("knowledgeStore") EmbeddingStore<TextSegment> knowledgeStore,
-                              @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore) {
+                              @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
+                              HybridSearchService hybridSearchService) {
         this.chatModel = chatModel;
         this.streamingChatModel = streamingChatModel;
         this.embeddingModel = embeddingModel;
-        this.knowledgeStore = knowledgeStore;
         this.cacheStore = cacheStore;
+        this.hybridSearchService = hybridSearchService;
     }
 
     public String ask(String query) {
         log.info("Processing query: {}", query);
 
-        // 1. Generate Query Embedding
+        // 1. Generate Query Embedding (Needed for cache)
         Embedding queryEmbedding = embeddingModel.embed(query).content();
 
         // 2. Check Semantic Cache
@@ -66,14 +66,10 @@ public class QueryRoutingService {
             return cacheMatches.get(0).embedded().text();
         }
 
-        log.info("CACHE_MISS: Proceeding to RAG retrieval");
+        log.info("CACHE_MISS: Proceeding to Hybrid Search retrieval");
 
-        // 3. RAG Retrieval
-        EmbeddingSearchRequest knowledgeSearchRequest = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(5)
-                .build();
-        List<EmbeddingMatch<TextSegment>> knowledgeMatches = knowledgeStore.search(knowledgeSearchRequest).matches();
+        // 3. Hybrid Search Retrieval (Combines Vector + Keyword)
+        List<EmbeddingMatch<TextSegment>> knowledgeMatches = hybridSearchService.search(query, 5);
 
         String context = knowledgeMatches.stream()
                 .map(match -> match.embedded().text())
@@ -101,7 +97,7 @@ public class QueryRoutingService {
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
         log.info("Processing streaming query: {}", query);
 
-        // 1. Generate Query Embedding
+        // 1. Generate Query Embedding (Needed for cache)
         Embedding queryEmbedding = embeddingModel.embed(query).content();
 
         // 2. Check Semantic Cache
@@ -120,14 +116,10 @@ public class QueryRoutingService {
             return;
         }
 
-        log.info("CACHE_MISS: Proceeding to RAG retrieval");
+        log.info("CACHE_MISS: Proceeding to Hybrid Search retrieval");
 
-        // 3. RAG Retrieval
-        EmbeddingSearchRequest knowledgeSearchRequest = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(5)
-                .build();
-        List<EmbeddingMatch<TextSegment>> knowledgeMatches = knowledgeStore.search(knowledgeSearchRequest).matches();
+        // 3. Hybrid Search Retrieval (Combines Vector + Keyword)
+        List<EmbeddingMatch<TextSegment>> knowledgeMatches = hybridSearchService.search(query, 5);
 
         String context = knowledgeMatches.stream()
                 .map(match -> match.embedded().text())
