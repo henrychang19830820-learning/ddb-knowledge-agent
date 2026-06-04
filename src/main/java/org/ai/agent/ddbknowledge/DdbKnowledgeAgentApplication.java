@@ -49,6 +49,7 @@ public class DdbKnowledgeAgentApplication {
                  "🚀 DDB Knowledge Agent is ready!\n" +
                  "Local UI:   http://localhost:8090\n" +
                  "WSL UI IP:  http://{}:8090\n" +
+                 "PGWeb UI:   http://localhost:5433\n" +
                  "----------------------------------------------------------", wslIp);
     }
 }
