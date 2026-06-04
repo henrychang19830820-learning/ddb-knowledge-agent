@@ -9,15 +9,21 @@ services:
       POSTGRES_PASSWORD: password
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d ddb_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   pgweb:
     image: sosedoff/pgweb
     ports:
       - "5433:8081"
     environment:
-      - DATABASE_URL=postgres://user:password@postgres:5432/ddb_agent?sslmode=disable
+      - PGWEB_DATABASE_URL=postgres://user:password@postgres:5432/ddb_agent?sslmode=disable
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
