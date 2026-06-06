@@ -5,6 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -13,6 +14,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 
 @SpringBootApplication
+@EnableAsync
 @Slf4j
 public class DdbKnowledgeAgentApplication {
 
