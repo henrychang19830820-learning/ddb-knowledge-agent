@@ -21,11 +21,18 @@ public class AuditService {
 
     @Async
     public void recordAudit(AuditRecord record) {
+        log.info("Recording audit for model: {}. Tokens: In={}, Out={}", 
+                record.getModelName(), record.getInputTokens(), record.getOutputTokens());
+        
         PricingConfig.ModelPrice prices = findPricesForModel(record.getModelName());
+        log.info("Found prices for model {}: InputPrice={}, OutputPrice={}", 
+                record.getModelName(), prices.getInputPricePer1m(), prices.getOutputPricePer1m());
 
         BigDecimal inputCost = calculateCost(record.getInputTokens(), prices.getInputPricePer1m());
         BigDecimal outputCost = calculateCost(record.getOutputTokens(), prices.getOutputPricePer1m());
         BigDecimal totalCost = inputCost.add(outputCost);
+        
+        log.info("Calculated costs: Input={}, Output={}, Total={}", inputCost, outputCost, totalCost);
 
         String sql = """
             INSERT INTO request_audit_logs 
@@ -50,18 +57,31 @@ public class AuditService {
     }
 
     private PricingConfig.ModelPrice findPricesForModel(String modelName) {
-        if (pricingConfig.getModels() == null || modelName == null) {
+        if (pricingConfig.getModels() == null) {
+            log.warn("PricingConfig.getModels() is NULL!");
+            return new PricingConfig.ModelPrice();
+        }
+        if (pricingConfig.getModels().isEmpty()) {
+            log.warn("PricingConfig.getModels() is EMPTY!");
+            return new PricingConfig.ModelPrice();
+        }
+        if (modelName == null) {
             return new PricingConfig.ModelPrice();
         }
 
+        // Sanitize the model name to match YAML keys (remove dots)
+        String sanitizedModelName = modelName.replace(".", "");
+        
+        log.info("Available models in config: {}", pricingConfig.getModels().keySet());
+
         // 1. Exact match
-        if (pricingConfig.getModels().containsKey(modelName)) {
-            return pricingConfig.getModels().get(modelName);
+        if (pricingConfig.getModels().containsKey(sanitizedModelName)) {
+            return pricingConfig.getModels().get(sanitizedModelName);
         }
 
-        // 2. Best prefix match (e.g. gemini-3.1-flash-lite-preview matches gemini-3.1-flash-lite)
+        // 2. Best prefix match
         return pricingConfig.getModels().entrySet().stream()
-                .filter(entry -> modelName.startsWith(entry.getKey()))
+                .filter(entry -> sanitizedModelName.startsWith(entry.getKey()))
                 .max(java.util.Comparator.comparingInt(e -> e.getKey().length()))
                 .map(java.util.Map.Entry::getValue)
                 .orElse(new PricingConfig.ModelPrice());

@@ -36,22 +36,21 @@ agent:
   ingest:
     docs-path: ${INGEST_DOCS_PATH:local_test_docs}
   pricing:
-    models:
-      gemini-3.5-flash:
-        input-price-per-1m: 1.50
-        output-price-per-1m: 9.00
-      gemini-3.1-flash-lite:
-        input-price-per-1m: 0.25
-        output-price-per-1m: 1.50
-      gemini-3.1-flash-lite-preview:
-        input-price-per-1m: 0.25
-        output-price-per-1m: 1.50
-      gemini-2.5-pro:
-        input-price-per-1m: 1.25
-        output-price-per-1m: 10.00
-      gemini-2.5-flash:
-        input-price-per-1m: 0.30
-        output-price-per-1m: 2.50
-      gemini-2.5-flash-lite:
-        input-price-per-1m: 0.10
-        output-price-per-1m: 0.40
+    gemini-35-flash:
+      input-price-per-1m: 1.50
+      output-price-per-1m: 9.00
+    gemini-31-flash-lite:
+      input-price-per-1m: 0.25
+      output-price-per-1m: 1.50
+    gemini-31-flash-lite-preview:
+      input-price-per-1m: 0.25
+      output-price-per-1m: 1.50
+    gemini-25-pro:
+      input-price-per-1m: 1.25
+      output-price-per-1m: 10.00
+    gemini-25-flash:
+      input-price-per-1m: 0.30
+      output-price-per-1m: 2.50
+    gemini-25-flash-lite:
+      input-price-per-1m: 0.10
+      output-price-per-1m: 0.40

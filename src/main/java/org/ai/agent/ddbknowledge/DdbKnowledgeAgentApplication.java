@@ -1,9 +1,11 @@
 package org.ai.agent.ddbknowledge;
 
 import lombok.extern.slf4j.Slf4j;
+import org.ai.agent.ddbknowledge.config.PricingConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.EnableAsync;
 
@@ -15,6 +17,7 @@ import java.util.Enumeration;
 
 @SpringBootApplication
 @EnableAsync
+@EnableConfigurationProperties(PricingConfig.class)
 @Slf4j
 public class DdbKnowledgeAgentApplication {
 
