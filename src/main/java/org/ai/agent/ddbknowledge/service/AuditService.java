@@ -21,9 +21,7 @@ public class AuditService {
 
     @Async
     public void recordAudit(AuditRecord record) {
-        PricingConfig.ModelPrice prices = pricingConfig.getModels() != null 
-                ? pricingConfig.getModels().getOrDefault(record.getModelName(), new PricingConfig.ModelPrice())
-                : new PricingConfig.ModelPrice();
+        PricingConfig.ModelPrice prices = findPricesForModel(record.getModelName());
 
         BigDecimal inputCost = calculateCost(record.getInputTokens(), prices.getInputPricePer1m());
         BigDecimal outputCost = calculateCost(record.getOutputTokens(), prices.getOutputPricePer1m());
@@ -49,6 +47,24 @@ public class AuditService {
                 record.getTotalLatencyMs(),
                 record.isCacheHit()
         );
+    }
+
+    private PricingConfig.ModelPrice findPricesForModel(String modelName) {
+        if (pricingConfig.getModels() == null || modelName == null) {
+            return new PricingConfig.ModelPrice();
+        }
+
+        // 1. Exact match
+        if (pricingConfig.getModels().containsKey(modelName)) {
+            return pricingConfig.getModels().get(modelName);
+        }
+
+        // 2. Best prefix match (e.g. gemini-3.1-flash-lite-preview matches gemini-3.1-flash-lite)
+        return pricingConfig.getModels().entrySet().stream()
+                .filter(entry -> modelName.startsWith(entry.getKey()))
+                .max(java.util.Comparator.comparingInt(e -> e.getKey().length()))
+                .map(java.util.Map.Entry::getValue)
+                .orElse(new PricingConfig.ModelPrice());
     }
 
     private BigDecimal calculateCost(int tokens, double pricePer1m) {

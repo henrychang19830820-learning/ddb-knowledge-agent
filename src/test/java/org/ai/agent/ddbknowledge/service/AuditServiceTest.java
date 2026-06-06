@@ -66,5 +66,42 @@ class AuditServiceTest {
                 eq(200L),
                 eq(false)
         );
-    }
+        }
+
+        @Test
+        void testPrefixModelMatching() {
+        // Setup mock pricing for base model
+        PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
+        price.setInputPricePer1m(0.10);
+        price.setOutputPricePer1m(0.40);
+        when(pricingConfig.getModels()).thenReturn(Map.of("gemini-3.1-flash-lite", price));
+
+        // Record audit for a preview variation
+        AuditRecord record = AuditRecord.builder()
+                .modelName("gemini-3.1-flash-lite-preview")
+                .inputTokens(1000)
+                .outputTokens(1000)
+                .build();
+
+        auditService.recordAudit(record);
+
+        // Expected cost: 1000 * 0.10 / 1M = 0.0001
+        BigDecimal expectedInputCost = new BigDecimal("0.0001000000");
+
+        verify(jdbcTemplate).update(
+                anyString(),
+                any(),
+                eq("gemini-3.1-flash-lite-preview"),
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                eq(expectedInputCost),
+                any(),
+                any(),
+                anyLong(),
+                anyLong(),
+                anyBoolean()
+        );
+        }
+
 }

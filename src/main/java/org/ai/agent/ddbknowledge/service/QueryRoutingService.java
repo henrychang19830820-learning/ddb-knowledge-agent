@@ -15,6 +15,7 @@ import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
+import org.ai.agent.ddbknowledge.dto.AuditRecord;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -31,24 +32,31 @@ public class QueryRoutingService {
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
     private final HybridSearchService hybridSearchService;
+    private final AuditService auditService;
 
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
+
+    @Value("${langchain4j.google-ai-studio.chat-model.model-name}")
+    private String modelName;
 
     public QueryRoutingService(ChatLanguageModel chatModel,
                               StreamingChatLanguageModel streamingChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
-                              HybridSearchService hybridSearchService) {
+                              HybridSearchService hybridSearchService,
+                              AuditService auditService) {
         this.chatModel = chatModel;
         this.streamingChatModel = streamingChatModel;
         this.embeddingModel = embeddingModel;
         this.cacheStore = cacheStore;
         this.hybridSearchService = hybridSearchService;
+        this.auditService = auditService;
     }
 
     public String ask(String query) {
         log.info("Processing query: {}", query);
+        long startTime = System.nanoTime();
 
         // 1. Generate Query Embedding (Needed for cache)
         Embedding queryEmbedding = embeddingModel.embed(query).content();
@@ -63,7 +71,20 @@ public class QueryRoutingService {
 
         if (!cacheMatches.isEmpty()) {
             log.info("CACHE_HIT: Found similar query with score {}", cacheMatches.get(0).score());
-            return cacheMatches.get(0).embedded().text();
+            String answer = cacheMatches.get(0).embedded().text();
+            
+            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+            auditService.recordAudit(AuditRecord.builder()
+                    .queryText(query)
+                    .modelName(modelName)
+                    .inputTokens(0)
+                    .outputTokens(0)
+                    .ttftMs(totalLatency)
+                    .totalLatencyMs(totalLatency)
+                    .isCacheHit(true)
+                    .build());
+            
+            return answer;
         }
 
         log.info("CACHE_MISS: Proceeding to Hybrid Search retrieval");
@@ -84,6 +105,20 @@ public class QueryRoutingService {
                 UserMessage.from(query)
         );
         String answer = response.content().text();
+        
+        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+        int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
+        int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
+
+        auditService.recordAudit(AuditRecord.builder()
+                .queryText(query)
+                .modelName(modelName)
+                .inputTokens(inputTokens)
+                .outputTokens(outputTokens)
+                .ttftMs(totalLatency) // For non-streaming, TTFT is total latency
+                .totalLatencyMs(totalLatency)
+                .isCacheHit(false)
+                .build());
 
         // 5. Update Cache (Store the query as embedding and the answer as text)
         log.info("Updating semantic cache with new answer");
@@ -96,6 +131,7 @@ public class QueryRoutingService {
 
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
         log.info("Processing streaming query: {}", query);
+        long startTime = System.nanoTime();
 
         // 1. Generate Query Embedding (Needed for cache)
         Embedding queryEmbedding = embeddingModel.embed(query).content();
@@ -111,6 +147,18 @@ public class QueryRoutingService {
         if (!cacheMatches.isEmpty()) {
             log.info("CACHE_HIT: Found similar query with score {}", cacheMatches.get(0).score());
             String cachedAnswer = cacheMatches.get(0).embedded().text();
+            
+            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+            auditService.recordAudit(AuditRecord.builder()
+                    .queryText(query)
+                    .modelName(modelName)
+                    .inputTokens(0)
+                    .outputTokens(0)
+                    .ttftMs(totalLatency)
+                    .totalLatencyMs(totalLatency)
+                    .isCacheHit(true)
+                    .build());
+            
             handler.onNext(cachedAnswer);
             handler.onComplete(Response.from(AiMessage.from(cachedAnswer)));
             return;
@@ -134,14 +182,35 @@ public class QueryRoutingService {
         streamingChatModel.generate(
                 java.util.Arrays.asList(SystemMessage.from(systemPrompt), UserMessage.from(query)),
                 new StreamingResponseHandler<AiMessage>() {
+                    private boolean firstTokenReceived = false;
+                    private long ttft = 0;
+
                     @Override
                     public void onNext(String token) {
+                        if (!firstTokenReceived) {
+                            ttft = (System.nanoTime() - startTime) / 1_000_000;
+                            firstTokenReceived = true;
+                        }
                         fullResponse.append(token);
                         handler.onNext(token);
                     }
 
                     @Override
                     public void onComplete(Response<AiMessage> response) {
+                        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                        int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
+                        int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
+
+                        auditService.recordAudit(AuditRecord.builder()
+                                .queryText(query)
+                                .modelName(modelName)
+                                .inputTokens(inputTokens)
+                                .outputTokens(outputTokens)
+                                .ttftMs(ttft)
+                                .totalLatencyMs(totalLatency)
+                                .isCacheHit(false)
+                                .build());
+
                         // 5. Update Cache
                         log.info("Updating semantic cache with new streamed answer");
                         Metadata metadata = new Metadata();
@@ -153,6 +222,16 @@ public class QueryRoutingService {
 
                     @Override
                     public void onError(Throwable error) {
+                        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                        auditService.recordAudit(AuditRecord.builder()
+                                .queryText(query)
+                                .modelName(modelName)
+                                .inputTokens(0)
+                                .outputTokens(0)
+                                .ttftMs(ttft)
+                                .totalLatencyMs(totalLatency)
+                                .isCacheHit(false)
+                                .build());
                         handler.onError(error);
                     }
                 }

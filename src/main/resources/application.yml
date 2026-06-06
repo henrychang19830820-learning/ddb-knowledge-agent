@@ -46,6 +46,9 @@ agent:
       gemini-3.1-flash-lite:
         input-price-per-1m: 0.05
         output-price-per-1m: 0.20
+      gemini-3.1-flash-lite-preview:
+        input-price-per-1m: 0.05
+        output-price-per-1m: 0.20
       gemini-2.5-flash:
         input-price-per-1m: 0.075
         output-price-per-1m: 0.30
