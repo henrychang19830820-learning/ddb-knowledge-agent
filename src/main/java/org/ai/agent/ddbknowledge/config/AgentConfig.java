@@ -22,22 +22,39 @@ public class AgentConfig {
     @Value("${langchain4j.google-ai-studio.chat-model.api-key}")
     private String apiKey;
 
-    @Value("${langchain4j.google-ai-studio.chat-model.model-name}")
-    private String modelName;
+    @Value("${agent.routing.classifier-model}")
+    private String classifierModelName;
+
+    @Value("${agent.routing.simple-tier-model}")
+    private String simpleTierModelName;
+
+    @Value("${agent.routing.complex-tier-model}")
+    private String complexTierModelName;
 
     @Bean
-    public ChatLanguageModel chatLanguageModel() {
+    @org.springframework.beans.factory.annotation.Qualifier("classifierModel")
+    public ChatLanguageModel classifierModel() {
         return GoogleAiGeminiChatModel.builder()
                 .apiKey(apiKey)
-                .modelName(modelName)
+                .modelName(classifierModelName)
                 .build();
     }
 
     @Bean
-    public StreamingChatLanguageModel streamingChatLanguageModel() {
+    @org.springframework.beans.factory.annotation.Qualifier("simpleChatModel")
+    public StreamingChatLanguageModel simpleChatModel() {
         return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
-                .modelName(modelName)
+                .modelName(simpleTierModelName)
+                .build();
+    }
+
+    @Bean
+    @org.springframework.beans.factory.annotation.Qualifier("complexChatModel")
+    public StreamingChatLanguageModel complexChatModel() {
+        return GoogleAiGeminiStreamingChatModel.builder()
+                .apiKey(apiKey)
+                .modelName(complexTierModelName)
                 .build();
     }
 

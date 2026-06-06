@@ -63,11 +63,6 @@ public class QueryController {
         }
     }
 
-    @GetMapping("/ask")
-    public String ask(@RequestParam String question) {
-        return queryRoutingService.ask(question);
-    }
-
     @GetMapping("/ask-stream")
     public SseEmitter askStream(@RequestParam String question) {
         SseEmitter emitter = new SseEmitter(60000L); // 1 minute timeout

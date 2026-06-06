@@ -42,6 +42,7 @@ ON ddb_semantic_cache USING hnsw (embedding vector_cosine_ops);
 DROP TABLE IF EXISTS request_audit_logs;
 CREATE TABLE request_audit_logs (
     audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id UUID,
     query_text TEXT,
     model_name TEXT,
     

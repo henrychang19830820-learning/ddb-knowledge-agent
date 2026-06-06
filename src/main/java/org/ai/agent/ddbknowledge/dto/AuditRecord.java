@@ -13,4 +13,5 @@ public class AuditRecord {
     private long ttftMs;
     private long totalLatencyMs;
     private boolean isCacheHit;
+    private String traceId;
 }

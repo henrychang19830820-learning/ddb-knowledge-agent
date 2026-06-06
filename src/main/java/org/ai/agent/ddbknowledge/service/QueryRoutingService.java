@@ -21,14 +21,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class QueryRoutingService {
 
-    private final ChatLanguageModel chatModel;
-    private final StreamingChatLanguageModel streamingChatModel;
+    private final ModelRoutingService modelRoutingService;
+    private final StreamingChatLanguageModel simpleChatModel;
+    private final StreamingChatLanguageModel complexChatModel;
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
     private final HybridSearchService hybridSearchService;
@@ -37,100 +39,31 @@ public class QueryRoutingService {
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
 
-    @Value("${langchain4j.google-ai-studio.chat-model.model-name}")
-    private String modelName;
+    @Value("${agent.routing.simple-tier-model}")
+    private String simpleTierModelName;
 
-    public QueryRoutingService(ChatLanguageModel chatModel,
-                              StreamingChatLanguageModel streamingChatModel,
+    @Value("${agent.routing.complex-tier-model}")
+    private String complexTierModelName;
+
+    public QueryRoutingService(ModelRoutingService modelRoutingService,
+                              @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
+                              @Qualifier("complexChatModel") StreamingChatLanguageModel complexChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
                               HybridSearchService hybridSearchService,
                               AuditService auditService) {
-        this.chatModel = chatModel;
-        this.streamingChatModel = streamingChatModel;
+        this.modelRoutingService = modelRoutingService;
+        this.simpleChatModel = simpleChatModel;
+        this.complexChatModel = complexChatModel;
         this.embeddingModel = embeddingModel;
         this.cacheStore = cacheStore;
         this.hybridSearchService = hybridSearchService;
         this.auditService = auditService;
     }
 
-    public String ask(String query) {
-        log.info("Processing query: {}", query);
-        long startTime = System.nanoTime();
-
-        // 1. Generate Query Embedding (Needed for cache)
-        Embedding queryEmbedding = embeddingModel.embed(query).content();
-
-        // 2. Check Semantic Cache
-        EmbeddingSearchRequest cacheSearchRequest = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(1)
-                .minScore(cacheThreshold)
-                .build();
-        List<EmbeddingMatch<TextSegment>> cacheMatches = cacheStore.search(cacheSearchRequest).matches();
-
-        if (!cacheMatches.isEmpty()) {
-            log.info("CACHE_HIT: Found similar query with score {}", cacheMatches.get(0).score());
-            String answer = cacheMatches.get(0).embedded().text();
-            
-            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-            auditService.recordAudit(AuditRecord.builder()
-                    .queryText(query)
-                    .modelName(modelName)
-                    .inputTokens(0)
-                    .outputTokens(0)
-                    .ttftMs(totalLatency)
-                    .totalLatencyMs(totalLatency)
-                    .isCacheHit(true)
-                    .build());
-            
-            return answer;
-        }
-
-        log.info("CACHE_MISS: Proceeding to Hybrid Search retrieval");
-
-        // 3. Hybrid Search Retrieval (Combines Vector + Keyword)
-        List<EmbeddingMatch<TextSegment>> knowledgeMatches = hybridSearchService.search(query, 5);
-
-        String context = knowledgeMatches.stream()
-                .map(match -> match.embedded().text())
-                .collect(Collectors.joining("\n\n"));
-
-        // 4. Generate Answer using Gemini
-        String systemPrompt = "You are a DynamoDB expert. Answer the user's question using only the provided context from the official documentation. " +
-                "If the answer is not in the context, say you don't know. \n\nContext:\n" + context;
-
-        Response<AiMessage> response = chatModel.generate(
-                SystemMessage.from(systemPrompt),
-                UserMessage.from(query)
-        );
-        String answer = response.content().text();
-        
-        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-        int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
-        int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
-
-        auditService.recordAudit(AuditRecord.builder()
-                .queryText(query)
-                .modelName(modelName)
-                .inputTokens(inputTokens)
-                .outputTokens(outputTokens)
-                .ttftMs(totalLatency) // For non-streaming, TTFT is total latency
-                .totalLatencyMs(totalLatency)
-                .isCacheHit(false)
-                .build());
-
-        // 5. Update Cache (Store the query as embedding and the answer as text)
-        log.info("Updating semantic cache with new answer");
-        Metadata metadata = new Metadata();
-        metadata.put("original_query", query);
-        cacheStore.add(queryEmbedding, TextSegment.from(answer, metadata));
-
-        return answer;
-    }
-
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
-        log.info("Processing streaming query: {}", query);
+        String traceId = UUID.randomUUID().toString();
+        log.info("Processing streaming query [traceId={}]: {}", traceId, query);
         long startTime = System.nanoTime();
 
         // 1. Generate Query Embedding (Needed for cache)
@@ -145,18 +78,19 @@ public class QueryRoutingService {
         List<EmbeddingMatch<TextSegment>> cacheMatches = cacheStore.search(cacheSearchRequest).matches();
 
         if (!cacheMatches.isEmpty()) {
-            log.info("CACHE_HIT: Found similar query with score {}", cacheMatches.get(0).score());
+            log.info("CACHE_HIT [traceId={}]: Found similar query with score {}", traceId, cacheMatches.get(0).score());
             String cachedAnswer = cacheMatches.get(0).embedded().text();
             
             long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
             auditService.recordAudit(AuditRecord.builder()
                     .queryText(query)
-                    .modelName(modelName)
+                    .modelName(simpleTierModelName)
                     .inputTokens(0)
                     .outputTokens(0)
                     .ttftMs(totalLatency)
                     .totalLatencyMs(totalLatency)
                     .isCacheHit(true)
+                    .traceId(traceId)
                     .build());
             
             handler.onNext(cachedAnswer);
@@ -164,7 +98,7 @@ public class QueryRoutingService {
             return;
         }
 
-        log.info("CACHE_MISS: Proceeding to Hybrid Search retrieval");
+        log.info("CACHE_MISS [traceId={}]: Proceeding to Hybrid Search retrieval", traceId);
 
         // 3. Hybrid Search Retrieval (Combines Vector + Keyword)
         List<EmbeddingMatch<TextSegment>> knowledgeMatches = hybridSearchService.search(query, 5);
@@ -173,13 +107,19 @@ public class QueryRoutingService {
                 .map(match -> match.embedded().text())
                 .collect(Collectors.joining("\n\n"));
 
-        // 4. Generate Answer using Gemini (Streaming)
+        // 4. Dynamic Model Selection
+        boolean isComplex = modelRoutingService.isComplexQuery(query, traceId);
+        StreamingChatLanguageModel selectedModel = isComplex ? complexChatModel : simpleChatModel;
+        String selectedModelName = isComplex ? complexTierModelName : simpleTierModelName;
+        log.info("Selected model {} [traceId={}]", selectedModelName, traceId);
+
+        // 5. Generate Answer (Streaming)
         String systemPrompt = "You are a DynamoDB expert. Answer the user's question using only the provided context from the official documentation. " +
                 "If the answer is not in the context, say you don't know. \n\nContext:\n" + context;
 
         StringBuilder fullResponse = new StringBuilder();
 
-        streamingChatModel.generate(
+        selectedModel.generate(
                 java.util.Arrays.asList(SystemMessage.from(systemPrompt), UserMessage.from(query)),
                 new StreamingResponseHandler<AiMessage>() {
                     private boolean firstTokenReceived = false;
@@ -203,16 +143,17 @@ public class QueryRoutingService {
 
                         auditService.recordAudit(AuditRecord.builder()
                                 .queryText(query)
-                                .modelName(modelName)
+                                .modelName(selectedModelName)
                                 .inputTokens(inputTokens)
                                 .outputTokens(outputTokens)
                                 .ttftMs(ttft)
                                 .totalLatencyMs(totalLatency)
                                 .isCacheHit(false)
+                                .traceId(traceId)
                                 .build());
 
-                        // 5. Update Cache
-                        log.info("Updating semantic cache with new streamed answer");
+                        // 6. Update Cache
+                        log.info("Updating semantic cache with new streamed answer [traceId={}]", traceId);
                         Metadata metadata = new Metadata();
                         metadata.put("original_query", query);
                         cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
@@ -225,12 +166,13 @@ public class QueryRoutingService {
                         long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
                         auditService.recordAudit(AuditRecord.builder()
                                 .queryText(query)
-                                .modelName(modelName)
+                                .modelName(selectedModelName)
                                 .inputTokens(0)
                                 .outputTokens(0)
                                 .ttftMs(ttft)
                                 .totalLatencyMs(totalLatency)
                                 .isCacheHit(false)
+                                .traceId(traceId)
                                 .build());
                         handler.onError(error);
                     }

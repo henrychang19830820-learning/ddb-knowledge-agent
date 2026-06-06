@@ -37,8 +37,8 @@ public class AuditService {
         String sql = """
             INSERT INTO request_audit_logs 
             (query_text, model_name, input_tokens, output_tokens, total_tokens, 
-             input_cost, output_cost, total_cost, ttft_ms, total_latency_ms, is_cache_hit)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             input_cost, output_cost, total_cost, ttft_ms, total_latency_ms, is_cache_hit, trace_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         jdbcTemplate.update(sql,
@@ -52,7 +52,8 @@ public class AuditService {
                 totalCost,
                 record.getTtftMs(),
                 record.getTotalLatencyMs(),
-                record.isCacheHit()
+                record.isCacheHit(),
+                record.getTraceId() != null ? java.util.UUID.fromString(record.getTraceId()) : null
         );
     }
 

@@ -64,20 +64,60 @@ class AuditServiceTest {
                 eq(expectedTotalCost),
                 eq(150L),
                 eq(200L),
-                eq(false)
+                eq(false),
+                isNull()
         );
-        }
+    }
 
-        @Test
-        void testPrefixModelMatching() {
-        // Setup mock pricing for base model
+    @Test
+    void testRecordAudit_IncludesTraceId() {
+        // Setup mock pricing
         PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
         price.setInputPricePer1m(0.10);
         price.setOutputPricePer1m(0.40);
-        when(pricingConfig.getModels()).thenReturn(Map.of("gemini-3.1-flash-lite", price));
+        when(pricingConfig.getModels()).thenReturn(Map.of("test-model", price));
+
+        String traceId = "550e8400-e29b-41d4-a716-446655440000";
+        AuditRecord record = AuditRecord.builder()
+                .queryText("Test query")
+                .modelName("test-model")
+                .inputTokens(1000)
+                .outputTokens(1000)
+                .traceId(traceId)
+                .build();
+
+        // Execute
+        auditService.recordAudit(record);
+
+        // Verify JDBC call includes trace_id
+        verify(jdbcTemplate).update(
+                contains("trace_id"),
+                eq("Test query"),
+                eq("test-model"),
+                eq(1000),
+                eq(1000),
+                eq(2000),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                anyLong(),
+                anyLong(),
+                anyBoolean(),
+                eq(java.util.UUID.fromString(traceId))
+        );
+    }
+
+    @Test
+    void testPrefixModelMatching() {
+        // Setup mock pricing for base model (sanitized key)
+        PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
+        price.setInputPricePer1m(0.10);
+        price.setOutputPricePer1m(0.40);
+        when(pricingConfig.getModels()).thenReturn(Map.of("gemini-31-flash-lite", price));
 
         // Record audit for a preview variation
         AuditRecord record = AuditRecord.builder()
+                .queryText("Prefix query")
                 .modelName("gemini-3.1-flash-lite-preview")
                 .inputTokens(1000)
                 .outputTokens(1000)
@@ -90,17 +130,18 @@ class AuditServiceTest {
 
         verify(jdbcTemplate).update(
                 anyString(),
-                any(),
+                eq("Prefix query"),
                 eq("gemini-3.1-flash-lite-preview"),
-                anyInt(),
-                anyInt(),
-                anyInt(),
+                eq(1000),
+                eq(1000),
+                eq(2000),
                 eq(expectedInputCost),
                 any(),
                 any(),
                 anyLong(),
                 anyLong(),
-                anyBoolean()
+                anyBoolean(),
+                isNull()
         );
         }
 
