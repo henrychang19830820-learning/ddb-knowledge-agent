@@ -77,9 +77,11 @@ public class QueryController {
             public void onNext(String token) {
                 log.debug("Streaming token: {}", token);
                 try {
+                    // SSE drops literal newlines in data fields. We encode them to preserve formatting.
+                    String safeToken = token.replace("\n", "%0A");
                     emitter.send(SseEmitter.event()
                             .name("token")
-                            .data(token));
+                            .data(safeToken));
                 } catch (java.io.IOException e) {
                     log.error("Failed to send token", e);
                 }

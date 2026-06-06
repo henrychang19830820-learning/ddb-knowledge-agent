@@ -204,6 +204,7 @@
         <button id="send-btn">Send</button>
     </footer>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         const chatContainer = document.getElementById('chat-container');
         const questionInput = document.getElementById('question-input');
@@ -257,13 +258,17 @@
         clearDocsBtn.addEventListener('click', clearDocs);
         clearCacheBtn.addEventListener('click', clearCache);
 
+        let currentRawResponse = '';
+
         function addMessage(text, isUser = false, isError = false) {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${isUser ? 'user-message' : 'ai-message'} ${isError ? 'error-message' : ''}`;
             
-            // Simple text rendering. If you want full markdown support, you could add a library like marked.js
-            // But for now, we'll keep it Vanilla and do basic line break handling.
-            msgDiv.innerText = text;
+            if (isUser || isError) {
+                msgDiv.innerText = text;
+            } else {
+                msgDiv.innerHTML = marked.parse(text);
+            }
             
             chatContainer.appendChild(msgDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -283,14 +288,25 @@
             addMessage(question, true);
 
             // Create AI bubble for streaming
-            const aiMsgDiv = addMessage('', false);
-            aiMsgDiv.innerText = '...';
+            const aiMsgDiv = document.createElement('div');
+            aiMsgDiv.className = 'message ai-message';
+            aiMsgDiv.innerHTML = '<span class="typing">Thinking...</span>';
+            chatContainer.appendChild(aiMsgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
 
+            currentRawResponse = '';
+
+            // Handle newline issues in SSE by using a custom decoder if needed, but EventSource usually joins multiline data with \n.
+            // If the server replaces \n, we'd handle it. Here we assume standard SSE.
             const eventSource = new EventSource(`/ask-stream?question=${encodeURIComponent(question)}`);
             
             eventSource.addEventListener('token', (event) => {
-                if (aiMsgDiv.innerText === '...') aiMsgDiv.innerText = '';
-                aiMsgDiv.innerText += event.data;
+                // Decode the safe token sent by the server to preserve newlines
+                let tokenText = event.data.replace(/%0A/g, '\n');
+                
+                currentRawResponse += tokenText;
+                
+                aiMsgDiv.innerHTML = marked.parse(currentRawResponse);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             });
 
@@ -303,7 +319,7 @@
 
             eventSource.addEventListener('error', (event) => {
                 console.error('SSE Error:', event);
-                if (aiMsgDiv.innerText === '...') {
+                if (currentRawResponse === '') {
                     aiMsgDiv.innerText = 'Error: Failed to get response from server.';
                     aiMsgDiv.classList.add('error-message');
                 }
