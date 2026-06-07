@@ -28,6 +28,9 @@ public class AgentConfig {
     @Value("${agent.routing.simple-tier-model}")
     private String simpleTierModelName;
 
+    @Value("${agent.routing.medium-tier-model}")
+    private String mediumTierModelName;
+
     @Value("${agent.routing.complex-tier-model}")
     private String complexTierModelName;
 
@@ -46,6 +49,15 @@ public class AgentConfig {
         return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(simpleTierModelName)
+                .build();
+    }
+
+    @Bean
+    @org.springframework.beans.factory.annotation.Qualifier("mediumChatModel")
+    public StreamingChatLanguageModel mediumChatModel() {
+        return GoogleAiGeminiStreamingChatModel.builder()
+                .apiKey(apiKey)
+                .modelName(mediumTierModelName)
                 .build();
     }
 

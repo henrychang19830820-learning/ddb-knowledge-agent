@@ -21,10 +21,6 @@ public class ModelRoutingService {
     private final AuditService auditService;
 
     @Setter
-    @Value("${agent.routing.complexity-threshold:5}")
-    private int complexityThreshold;
-
-    @Setter
     @Value("${agent.routing.classifier-model}")
     private String classifierModelName;
 

@@ -30,6 +30,7 @@ public class QueryRoutingService {
 
     private final ModelRoutingService modelRoutingService;
     private final StreamingChatLanguageModel simpleChatModel;
+    private final StreamingChatLanguageModel mediumChatModel;
     private final StreamingChatLanguageModel complexChatModel;
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
@@ -39,11 +40,17 @@ public class QueryRoutingService {
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
 
-    @Value("${agent.routing.complexity-threshold:5}")
-    private int complexityThreshold;
+    @Value("${agent.routing.simple-threshold:3}")
+    private int simpleThreshold;
+
+    @Value("${agent.routing.medium-threshold:6}")
+    private int mediumThreshold;
 
     @Value("${agent.routing.simple-tier-model}")
     private String simpleTierModelName;
+
+    @Value("${agent.routing.medium-tier-model}")
+    private String mediumTierModelName;
 
     @Value("${agent.routing.complex-tier-model}")
     private String complexTierModelName;
@@ -51,6 +58,7 @@ public class QueryRoutingService {
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
                               @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
+                              @Qualifier("mediumChatModel") StreamingChatLanguageModel mediumChatModel,
                               @Qualifier("complexChatModel") StreamingChatLanguageModel complexChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
@@ -58,6 +66,7 @@ public class QueryRoutingService {
                               AuditService auditService) {
         this.modelRoutingService = modelRoutingService;
         this.simpleChatModel = simpleChatModel;
+        this.mediumChatModel = mediumChatModel;
         this.complexChatModel = complexChatModel;
         this.embeddingModel = embeddingModel;
         this.cacheStore = cacheStore;
@@ -113,9 +122,21 @@ public class QueryRoutingService {
 
         // 4. Dynamic Model Selection
         int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
-        boolean isComplex = complexityScore > complexityThreshold;
-        StreamingChatLanguageModel selectedModel = isComplex ? complexChatModel : simpleChatModel;
-        String selectedModelName = isComplex ? complexTierModelName : simpleTierModelName;
+        
+        StreamingChatLanguageModel selectedModel;
+        String selectedModelName;
+
+        if (complexityScore <= simpleThreshold) {
+            selectedModel = simpleChatModel;
+            selectedModelName = simpleTierModelName;
+        } else if (complexityScore <= mediumThreshold) {
+            selectedModel = mediumChatModel;
+            selectedModelName = mediumTierModelName;
+        } else {
+            selectedModel = complexChatModel;
+            selectedModelName = complexTierModelName;
+        }
+        
         log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
 
         // 5. Generate Answer (Streaming)

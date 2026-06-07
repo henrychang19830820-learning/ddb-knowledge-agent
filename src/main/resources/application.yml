@@ -30,9 +30,11 @@ langchain4j:
 
 agent:
   routing:
-    complexity-threshold: 5
+    simple-threshold: 3
+    medium-threshold: 6
     classifier-model: "gemini-2.5-flash-lite"
-    simple-tier-model: "gemini-3.1-flash-lite-preview"
+    simple-tier-model: "gemini-2.5-flash-lite"
+    medium-tier-model: "gemini-3.1-flash-lite-preview"
     complex-tier-model: "gemini-3.5-flash"
   cache:
     # Threshold for semantic cache hit (1.0 is exact match)

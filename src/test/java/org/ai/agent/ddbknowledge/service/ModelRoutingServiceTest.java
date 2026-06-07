@@ -34,7 +34,6 @@ class ModelRoutingServiceTest {
 
         ModelRoutingService service = new ModelRoutingService(mockClassifier, mockAuditService);
         service.setClassifierModelName("gemini-lite");
-        service.setComplexityThreshold(5);
         
         int score = service.getComplexityScore("What is DynamoDB?", "00000000-0000-0000-0000-000000000123");
         
@@ -59,7 +58,6 @@ class ModelRoutingServiceTest {
 
         ModelRoutingService service = new ModelRoutingService(mockClassifier, mockAuditService);
         service.setClassifierModelName("gemini-lite");
-        service.setComplexityThreshold(5);
         
         int score = service.getComplexityScore("How do I implement a global secondary index with overloading for a multi-tenant application?", "00000000-0000-0000-0000-000000000456");
         
