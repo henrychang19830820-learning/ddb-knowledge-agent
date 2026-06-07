@@ -31,22 +31,16 @@ langchain4j:
 agent:
   routing:
     complexity-threshold: 5
-    classifier-model: "gemini-1.5-flash"
-    simple-tier-model: "gemini-1.5-flash"
-    complex-tier-model: "gemini-1.5-pro"
+    classifier-model: "gemini-3.1-flash-lite-preview"
+    simple-tier-model: "gemini-3.1-flash-lite-preview"
+    complex-tier-model: "gemini-3.5-flash"
   cache:
     # Threshold for semantic cache hit (1.0 is exact match)
     semantic-threshold: 0.92
   ingest:
     docs-path: ${INGEST_DOCS_PATH:local_test_docs}
   pricing:
-    gemini-1.5-flash:
-      input-price-per-1m: 0.075
-      output-price-per-1m: 0.30
-    gemini-1.5-pro:
-      input-price-per-1m: 3.50
-      output-price-per-1m: 10.50
-    gemini-3.5-flash:
+    gemini-35-flash:
       input-price-per-1m: 1.50
       output-price-per-1m: 9.00
     gemini-31-flash-lite:
