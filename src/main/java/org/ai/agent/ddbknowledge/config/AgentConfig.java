@@ -45,8 +45,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("simpleChatModel")
-    public StreamingChatLanguageModel simpleChatModel() {
-        return GoogleAiGeminiStreamingChatModel.builder()
+    public ChatLanguageModel simpleChatModel() {
+        return GoogleAiGeminiChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(simpleTierModelName)
                 .build();
@@ -54,8 +54,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("mediumChatModel")
-    public StreamingChatLanguageModel mediumChatModel() {
-        return GoogleAiGeminiStreamingChatModel.builder()
+    public ChatLanguageModel mediumChatModel() {
+        return GoogleAiGeminiChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(mediumTierModelName)
                 .build();
@@ -63,8 +63,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("complexChatModel")
-    public StreamingChatLanguageModel complexChatModel() {
-        return GoogleAiGeminiStreamingChatModel.builder()
+    public ChatLanguageModel complexChatModel() {
+        return GoogleAiGeminiChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(complexTierModelName)
                 .build();

@@ -5,7 +5,7 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
@@ -26,9 +26,9 @@ import java.util.UUID;
 public class QueryRoutingService {
 
     private final ModelRoutingService modelRoutingService;
-    private final StreamingChatLanguageModel simpleChatModel;
-    private final StreamingChatLanguageModel mediumChatModel;
-    private final StreamingChatLanguageModel complexChatModel;
+    private final ChatLanguageModel simpleChatModel;
+    private final ChatLanguageModel mediumChatModel;
+    private final ChatLanguageModel complexChatModel;
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
     private final DocumentationTool documentationTool;
@@ -54,9 +54,9 @@ public class QueryRoutingService {
 
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
-                              @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
-                              @Qualifier("mediumChatModel") StreamingChatLanguageModel mediumChatModel,
-                              @Qualifier("complexChatModel") StreamingChatLanguageModel complexChatModel,
+                              @Qualifier("simpleChatModel") ChatLanguageModel simpleChatModel,
+                              @Qualifier("mediumChatModel") ChatLanguageModel mediumChatModel,
+                              @Qualifier("complexChatModel") ChatLanguageModel complexChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
                               DocumentationTool documentationTool,
@@ -72,7 +72,7 @@ public class QueryRoutingService {
     }
 
     interface Assistant {
-        dev.langchain4j.service.TokenStream chat(String message);
+        dev.langchain4j.service.Result<String> chat(String message);
     }
 
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
@@ -117,7 +117,7 @@ public class QueryRoutingService {
         // 4. Dynamic Model Selection
         int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
         
-        StreamingChatLanguageModel selectedModel;
+        ChatLanguageModel selectedModel;
         String selectedModelName;
 
         if (complexityScore <= simpleThreshold) {
@@ -140,65 +140,59 @@ public class QueryRoutingService {
                 "Do not hallucinate technical specifications.";
 
         Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
-                .streamingChatLanguageModel(selectedModel)
+                .chatLanguageModel(selectedModel)
                 .chatMemory(dev.langchain4j.memory.chat.MessageWindowChatMemory.withMaxMessages(10))
                 .tools(documentationTool)
                 .systemMessageProvider(chatMemoryId -> systemPrompt)
                 .build();
 
-        StringBuilder fullResponse = new StringBuilder();
-        long[] ttft = new long[]{0};
-        boolean[] firstTokenReceived = new boolean[]{false};
+        try {
+            log.info("Starting ReAct loop for query [traceId={}]", traceId);
+            dev.langchain4j.service.Result<String> result = assistant.chat(query);
+            log.info("ReAct loop completed [traceId={}]", traceId);
+            
+            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+            String answer = result.content();
+            int inputTokens = result.tokenUsage() != null ? result.tokenUsage().inputTokenCount() : 0;
+            int outputTokens = result.tokenUsage() != null ? result.tokenUsage().outputTokenCount() : 0;
 
-        assistant.chat(query)
-                .onNext(token -> {
-                    if (!firstTokenReceived[0]) {
-                        ttft[0] = (System.nanoTime() - startTime) / 1_000_000;
-                        firstTokenReceived[0] = true;
-                    }
-                    fullResponse.append(token);
-                    handler.onNext(token);
-                })
-                .onComplete(response -> {
-                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                    int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
-                    int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
+            auditService.recordAudit(AuditRecord.builder()
+                    .queryText(query)
+                    .modelName(selectedModelName)
+                    .inputTokens(inputTokens)
+                    .outputTokens(outputTokens)
+                    .ttftMs(totalLatency) // No true TTFT since non-streaming
+                    .totalLatencyMs(totalLatency)
+                    .isCacheHit(false)
+                    .traceId(traceId)
+                    .complexityScore(complexityScore)
+                    .build());
 
-                    auditService.recordAudit(AuditRecord.builder()
-                            .queryText(query)
-                            .modelName(selectedModelName)
-                            .inputTokens(inputTokens)
-                            .outputTokens(outputTokens)
-                            .ttftMs(ttft[0])
-                            .totalLatencyMs(totalLatency)
-                            .isCacheHit(false)
-                            .traceId(traceId)
-                            .complexityScore(complexityScore)
-                            .build());
+            log.info("Updating semantic cache with new answer [traceId={}]", traceId);
+            Metadata metadata = new Metadata();
+            metadata.put("original_query", query);
+            cacheStore.add(queryEmbedding, TextSegment.from(answer, metadata));
 
-                    // 6. Update Cache
-                    log.info("Updating semantic cache with new streamed answer [traceId={}]", traceId);
-                    Metadata metadata = new Metadata();
-                    metadata.put("original_query", query);
-                    cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
+            // Send the complete answer to the streaming handler in one go
+            handler.onNext(answer);
+            handler.onComplete(Response.from(AiMessage.from(answer), result.tokenUsage(), dev.langchain4j.model.output.FinishReason.STOP));
 
-                    handler.onComplete(Response.from(dev.langchain4j.data.message.AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
-                })
-                .onError(error -> {
-                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                    auditService.recordAudit(AuditRecord.builder()
-                            .queryText(query)
-                            .modelName(selectedModelName)
-                            .inputTokens(0)
-                            .outputTokens(0)
-                            .ttftMs(ttft[0])
-                            .totalLatencyMs(totalLatency)
-                            .isCacheHit(false)
-                            .traceId(traceId)
-                            .complexityScore(complexityScore)
-                            .build());
-                    handler.onError(error);
-                });
+        } catch (Exception error) {
+            log.error("Error in ReAct loop [traceId={}]", traceId, error);
+            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+            auditService.recordAudit(AuditRecord.builder()
+                    .queryText(query)
+                    .modelName(selectedModelName)
+                    .inputTokens(0)
+                    .outputTokens(0)
+                    .ttftMs(totalLatency)
+                    .totalLatencyMs(totalLatency)
+                    .isCacheHit(false)
+                    .traceId(traceId)
+                    .complexityScore(complexityScore)
+                    .build());
+            handler.onError(error);
+        }
     }
 
     public void clearCache() {

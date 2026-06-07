@@ -65,7 +65,7 @@ public class QueryController {
 
     @GetMapping("/ask-stream")
     public SseEmitter askStream(@RequestParam String question) {
-        SseEmitter emitter = new SseEmitter(60000L); // 1 minute timeout
+        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout for ReAct loop
         
         queryRoutingService.askStreaming(question, new StreamingResponseHandler<AiMessage>() {
             @Override
