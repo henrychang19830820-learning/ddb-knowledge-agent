@@ -34,7 +34,7 @@ public class ModelRoutingService {
         this.auditService = auditService;
     }
 
-    public boolean isComplexQuery(String query, String traceId) {
+    public int getComplexityScore(String query, String traceId) {
         String prompt = """
                 Evaluate the complexity of the following user query regarding Amazon DynamoDB on a scale of 1 to 10.
                 1-3: Simple, factual, or basic definition questions.
@@ -63,12 +63,21 @@ public class ModelRoutingService {
                     .outputTokens(response.tokenUsage().outputTokenCount())
                     .totalLatencyMs(duration)
                     .traceId(traceId)
+                    .complexityScore(score)
                     .build());
 
-            return score > complexityThreshold;
+            return score;
         } catch (Exception e) {
             log.error("Error evaluating query complexity, defaulting to complex", e);
-            return true;
+            auditService.recordAudit(AuditRecord.builder()
+                    .queryText(query)
+                    .modelName(classifierModelName)
+                    .inputTokens(0)
+                    .outputTokens(0)
+                    .totalLatencyMs(System.currentTimeMillis() - startTime)
+                    .traceId(traceId)
+                    .build());
+            return 10; // Default to max score to route to complex tier
         }
     }
 }

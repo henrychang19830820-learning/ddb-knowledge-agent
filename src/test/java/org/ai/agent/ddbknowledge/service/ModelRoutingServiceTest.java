@@ -36,9 +36,10 @@ class ModelRoutingServiceTest {
         service.setClassifierModelName("gemini-lite");
         service.setComplexityThreshold(5);
         
-        boolean isComplex = service.isComplexQuery("What is DynamoDB?", "00000000-0000-0000-0000-000000000123");
+        int score = service.getComplexityScore("What is DynamoDB?", "00000000-0000-0000-0000-000000000123");
         
-        assertFalse(isComplex);
+        assertEquals(3, score);
+        assertFalse(score > 5);
         
         ArgumentCaptor<AuditRecord> captor = ArgumentCaptor.forClass(AuditRecord.class);
         verify(mockAuditService).recordAudit(captor.capture());
@@ -47,6 +48,7 @@ class ModelRoutingServiceTest {
         assertEquals("What is DynamoDB?", record.getQueryText());
         assertEquals("gemini-lite", record.getModelName());
         assertEquals("00000000-0000-0000-0000-000000000123", record.getTraceId());
+        assertEquals(3, record.getComplexityScore());
     }
 
     @Test
@@ -59,9 +61,10 @@ class ModelRoutingServiceTest {
         service.setClassifierModelName("gemini-lite");
         service.setComplexityThreshold(5);
         
-        boolean isComplex = service.isComplexQuery("How do I implement a global secondary index with overloading for a multi-tenant application?", "00000000-0000-0000-0000-000000000456");
+        int score = service.getComplexityScore("How do I implement a global secondary index with overloading for a multi-tenant application?", "00000000-0000-0000-0000-000000000456");
         
-        assertTrue(isComplex);
+        assertEquals(8, score);
+        assertTrue(score > 5);
         verify(mockAuditService).recordAudit(any(AuditRecord.class));
     }
 }

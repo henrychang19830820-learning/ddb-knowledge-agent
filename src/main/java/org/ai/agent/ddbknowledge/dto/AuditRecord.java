@@ -14,4 +14,5 @@ public class AuditRecord {
     private long totalLatencyMs;
     private boolean isCacheHit;
     private String traceId;
+    private Integer complexityScore;
 }

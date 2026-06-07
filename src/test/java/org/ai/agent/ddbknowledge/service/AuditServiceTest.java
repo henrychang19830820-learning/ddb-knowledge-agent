@@ -65,12 +65,13 @@ class AuditServiceTest {
                 eq(150L),
                 eq(200L),
                 eq(false),
-                isNull()
+                isNull(),
+                isNull() // complexity_score
         );
-    }
+        }
 
-    @Test
-    void testRecordAudit_IncludesTraceId() {
+        @Test
+        void testRecordAudit_IncludesTraceId() {
         // Setup mock pricing
         PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
         price.setInputPricePer1m(0.10);
@@ -103,12 +104,13 @@ class AuditServiceTest {
                 anyLong(),
                 anyLong(),
                 anyBoolean(),
-                eq(java.util.UUID.fromString(traceId))
+                eq(java.util.UUID.fromString(traceId)),
+                isNull() // complexity_score
         );
-    }
+        }
 
-    @Test
-    void testPrefixModelMatching() {
+        @Test
+        void testPrefixModelMatching() {
         // Setup mock pricing for base model (sanitized key)
         PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
         price.setInputPricePer1m(0.10);
@@ -141,8 +143,9 @@ class AuditServiceTest {
                 anyLong(),
                 anyLong(),
                 anyBoolean(),
-                isNull()
+                isNull(),
+                isNull() // complexity_score
         );
         }
 
-}
+        }

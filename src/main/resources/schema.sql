@@ -62,6 +62,7 @@ CREATE TABLE request_audit_logs (
     
     -- Metadata
     is_cache_hit BOOLEAN DEFAULT FALSE,
+    complexity_score INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

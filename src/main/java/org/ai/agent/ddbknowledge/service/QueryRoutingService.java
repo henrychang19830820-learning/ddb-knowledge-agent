@@ -39,11 +39,15 @@ public class QueryRoutingService {
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
 
+    @Value("${agent.routing.complexity-threshold:5}")
+    private int complexityThreshold;
+
     @Value("${agent.routing.simple-tier-model}")
     private String simpleTierModelName;
 
     @Value("${agent.routing.complex-tier-model}")
     private String complexTierModelName;
+
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
                               @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
@@ -108,10 +112,11 @@ public class QueryRoutingService {
                 .collect(Collectors.joining("\n\n"));
 
         // 4. Dynamic Model Selection
-        boolean isComplex = modelRoutingService.isComplexQuery(query, traceId);
+        int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
+        boolean isComplex = complexityScore > complexityThreshold;
         StreamingChatLanguageModel selectedModel = isComplex ? complexChatModel : simpleChatModel;
         String selectedModelName = isComplex ? complexTierModelName : simpleTierModelName;
-        log.info("Selected model {} [traceId={}]", selectedModelName, traceId);
+        log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
 
         // 5. Generate Answer (Streaming)
         String systemPrompt = "You are a DynamoDB expert. Answer the user's question using only the provided context from the official documentation. " +
@@ -150,6 +155,7 @@ public class QueryRoutingService {
                                 .totalLatencyMs(totalLatency)
                                 .isCacheHit(false)
                                 .traceId(traceId)
+                                .complexityScore(complexityScore)
                                 .build());
 
                         // 6. Update Cache
@@ -173,6 +179,7 @@ public class QueryRoutingService {
                                 .totalLatencyMs(totalLatency)
                                 .isCacheHit(false)
                                 .traceId(traceId)
+                                .complexityScore(complexityScore)
                                 .build());
                         handler.onError(error);
                     }
