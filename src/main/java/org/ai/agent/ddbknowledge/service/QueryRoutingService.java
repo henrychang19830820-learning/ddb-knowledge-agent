@@ -3,11 +3,8 @@ package org.ai.agent.ddbknowledge.service;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
@@ -16,13 +13,13 @@ import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 import org.ai.agent.ddbknowledge.dto.AuditRecord;
+import org.ai.agent.ddbknowledge.tool.DocumentationTool;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -34,7 +31,7 @@ public class QueryRoutingService {
     private final StreamingChatLanguageModel complexChatModel;
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
-    private final HybridSearchService hybridSearchService;
+    private final DocumentationTool documentationTool;
     private final AuditService auditService;
 
     @Value("${agent.cache.semantic-threshold:0.92}")
@@ -62,7 +59,7 @@ public class QueryRoutingService {
                               @Qualifier("complexChatModel") StreamingChatLanguageModel complexChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
-                              HybridSearchService hybridSearchService,
+                              DocumentationTool documentationTool,
                               AuditService auditService) {
         this.modelRoutingService = modelRoutingService;
         this.simpleChatModel = simpleChatModel;
@@ -70,8 +67,12 @@ public class QueryRoutingService {
         this.complexChatModel = complexChatModel;
         this.embeddingModel = embeddingModel;
         this.cacheStore = cacheStore;
-        this.hybridSearchService = hybridSearchService;
+        this.documentationTool = documentationTool;
         this.auditService = auditService;
+    }
+
+    interface Assistant {
+        dev.langchain4j.service.TokenStream chat(String message);
     }
 
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
@@ -111,14 +112,7 @@ public class QueryRoutingService {
             return;
         }
 
-        log.info("CACHE_MISS [traceId={}]: Proceeding to Hybrid Search retrieval", traceId);
-
-        // 3. Hybrid Search Retrieval (Combines Vector + Keyword)
-        List<EmbeddingMatch<TextSegment>> knowledgeMatches = hybridSearchService.search(query, 5);
-
-        String context = knowledgeMatches.stream()
-                .map(match -> match.embedded().text())
-                .collect(Collectors.joining("\n\n"));
+        log.info("CACHE_MISS [traceId={}]: Proceeding to ReAct loop", traceId);
 
         // 4. Dynamic Model Selection
         int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
@@ -139,73 +133,72 @@ public class QueryRoutingService {
         
         log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
 
-        // 5. Generate Answer (Streaming)
-        String systemPrompt = "You are a DynamoDB expert. Answer the user's question using only the provided context from the official documentation. " +
-                "If the answer is not in the context, say you don't know. \n\nContext:\n" + context;
+        // 5. Generate Answer (Streaming with ReAct)
+        String systemPrompt = "You are a DynamoDB expert. " +
+                "You have access to a tool to search the official documentation. You should use it to look up specific technical details. " +
+                "You may use your own training data to answer, but you MUST explicitly mention in your answer what information comes from the documentation context and what comes from your model training data. " +
+                "Do not hallucinate technical specifications.";
+
+        Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
+                .streamingChatLanguageModel(selectedModel)
+                .chatMemory(dev.langchain4j.memory.chat.MessageWindowChatMemory.withMaxMessages(10))
+                .tools(documentationTool)
+                .systemMessageProvider(chatMemoryId -> systemPrompt)
+                .build();
 
         StringBuilder fullResponse = new StringBuilder();
+        long[] ttft = new long[]{0};
+        boolean[] firstTokenReceived = new boolean[]{false};
 
-        selectedModel.generate(
-                java.util.Arrays.asList(SystemMessage.from(systemPrompt), UserMessage.from(query)),
-                new StreamingResponseHandler<AiMessage>() {
-                    private boolean firstTokenReceived = false;
-                    private long ttft = 0;
-
-                    @Override
-                    public void onNext(String token) {
-                        if (!firstTokenReceived) {
-                            ttft = (System.nanoTime() - startTime) / 1_000_000;
-                            firstTokenReceived = true;
-                        }
-                        fullResponse.append(token);
-                        handler.onNext(token);
+        assistant.chat(query)
+                .onNext(token -> {
+                    if (!firstTokenReceived[0]) {
+                        ttft[0] = (System.nanoTime() - startTime) / 1_000_000;
+                        firstTokenReceived[0] = true;
                     }
+                    fullResponse.append(token);
+                    handler.onNext(token);
+                })
+                .onComplete(response -> {
+                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                    int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
+                    int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
 
-                    @Override
-                    public void onComplete(Response<AiMessage> response) {
-                        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                        int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
-                        int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
+                    auditService.recordAudit(AuditRecord.builder()
+                            .queryText(query)
+                            .modelName(selectedModelName)
+                            .inputTokens(inputTokens)
+                            .outputTokens(outputTokens)
+                            .ttftMs(ttft[0])
+                            .totalLatencyMs(totalLatency)
+                            .isCacheHit(false)
+                            .traceId(traceId)
+                            .complexityScore(complexityScore)
+                            .build());
 
-                        auditService.recordAudit(AuditRecord.builder()
-                                .queryText(query)
-                                .modelName(selectedModelName)
-                                .inputTokens(inputTokens)
-                                .outputTokens(outputTokens)
-                                .ttftMs(ttft)
-                                .totalLatencyMs(totalLatency)
-                                .isCacheHit(false)
-                                .traceId(traceId)
-                                .complexityScore(complexityScore)
-                                .build());
+                    // 6. Update Cache
+                    log.info("Updating semantic cache with new streamed answer [traceId={}]", traceId);
+                    Metadata metadata = new Metadata();
+                    metadata.put("original_query", query);
+                    cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
 
-                        // 6. Update Cache
-                        log.info("Updating semantic cache with new streamed answer [traceId={}]", traceId);
-                        Metadata metadata = new Metadata();
-                        metadata.put("original_query", query);
-                        cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
-
-                        handler.onComplete(response);
-                    }
-
-                    @Override
-                    public void onError(Throwable error) {
-                        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                        auditService.recordAudit(AuditRecord.builder()
-                                .queryText(query)
-                                .modelName(selectedModelName)
-                                .inputTokens(0)
-                                .outputTokens(0)
-                                .ttftMs(ttft)
-                                .totalLatencyMs(totalLatency)
-                                .isCacheHit(false)
-                                .traceId(traceId)
-                                .complexityScore(complexityScore)
-                                .build());
-                        handler.onError(error);
-                    }
-                }
-        );
+                    handler.onComplete(Response.from(dev.langchain4j.data.message.AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
+                })
+                .onError(error -> {
+                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                    auditService.recordAudit(AuditRecord.builder()
+                            .queryText(query)
+                            .modelName(selectedModelName)
+                            .inputTokens(0)
+                            .outputTokens(0)
+                            .ttftMs(ttft[0])
+                            .totalLatencyMs(totalLatency)
+                            .isCacheHit(false)
+                            .traceId(traceId)
+                            .complexityScore(complexityScore)
+                            .build());
+                    handler.onError(error);
+                });
     }
 
     public void clearCache() {
