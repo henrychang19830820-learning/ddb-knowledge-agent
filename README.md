@@ -63,11 +63,13 @@ Ask a similar question; if the similarity score is > 0.92, it hits the cache (< 
 curl "http://localhost:8090/ask?question=What+should+I+do+with+hot+partitions?"
 ```
 
-## 🛠 Hybrid Architecture
-* **Semantic Search:** Uses `all-miniLM-L6-v2` embeddings and HNSW indexes in `pgvector`.
-* **Keyword Search:** Uses Postgres native Full-Text Search with linguistic stemming.
-* **Fusion (RRF):** Results are merged using the Reciprocal Rank Fusion algorithm to prioritize documents that rank highly in both search types.
-* **Semantic Cache:** Intercepts redundant queries to save LLM tokens and reduce latency.
+## 🛠 Hybrid ReAct Architecture
+The agent uses a **Reasoning + Acting (ReAct)** loop powered by LangChain4j `AiServices`.
+*   **Documentation Tool:** The agent has a native tool to perform **Hybrid Search** (Vector + Keyword) on documentation.
+*   **Bounded Memory:** The ReAct loop is limited to **10 turns** to ensure responsiveness and prevent runaway loops.
+*   **Source Awareness:** The agent is instructed to explicitly distinguish between information from the documentation vs. its own training data.
+*   **Dynamic Routing:** Based on query complexity (1-10), requests are routed to Simple, Medium, or Complex model tiers.
+*   **Distributed Auditing:** All model calls are linked via a `trace_id` for full cost and latency analysis.
 
 ## 📊 Database Management
 Use **pgweb** at [http://localhost:5433](http://localhost:5433) to inspect:

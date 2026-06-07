@@ -10,18 +10,19 @@ Before starting development, ensure the following tools are installed in your lo
 ## 1. Introduction & Objectives
 `ddb-knowledge-agent` is a local-first Java Spring Boot intelligent agent designed to answer technical questions precisely using the official Amazon DynamoDB Developer Guide. 
 
-The core architectural challenge is to maximize system performance, minimize latency, and save LLM token costs without sacrificing accuracy. To achieve this, the project implements a triple-layer retrieval strategy: **Semantic Cache Layer**, **Vector Search Layer**, and **Keyword Search Layer** (combined via **Hybrid RAG**).
+The system uses a **ReAct (Reasoning + Acting) Agent** architecture. Instead of hardcoded retrieval, the agent has agency to decide whether to search the documentation tool or rely on its internal training data, ensuring a more natural and comprehensive conversation.
 
 ### Core Objectives
-*   **Minimal Latency:** Utilize a local semantic cache to intercept identical or highly similar questions, achieving < 10ms responses without triggering remote LLM calls.
-*   **Contextual Accuracy:** Use Hybrid Search (Vector + Keyword) to ensure technical terms (e.g., "GSI", "TTL") and exact phrases are retrieved correctly from Markdown documentation.
-*   **Local-First Architecture:** The entire system runs locally using Java 21, Spring Boot 3.x, and PostgreSQL + pgvector for persistence. Generation is powered by Google Gemini Pro via the AI Studio API.
+*   **Minimal Latency:** Utilize a local semantic cache to intercept identical or highly similar questions, achieving < 10ms responses.
+*   **ReAct Architecture:** Implements a Tool-based reasoning loop (max 10 turns) allowing the agent to fetch technical context as needed.
+*   **Knowledge Distinction:** The agent explicitly distinguishes between information retrieved from the official documentation versus its own model training data.
+*   **Cost-Efficient Routing:** Automatically routes queries to different model tiers (Simple, Medium, Complex) based on an initial complexity evaluation.
 
 ---
 
 ## 2. Architectural Overview
 
-The system follows a sequential interceptor and hybrid retrieval pattern:
+The system follows a sequential interceptor, dynamic routing, and ReAct loop pattern:
 
 ```text
                   +-----------------------+
@@ -46,26 +47,32 @@ The system follows a sequential interceptor and hybrid retrieval pattern:
               |                               |
               v                               v
     +---------+---------+           +---------+---------+
-    | Return Cached     |           |   Hybrid Search   |
-    | Response          |           | (Vector + Keyword)|
+    | Return Cached     |           | Dynamic Routing   |
+    | Response          |           | (Complexity Score)|
     +---------+---------+           +---------+---------+
                                               |
                                               v
                                     +---------+---------+
-                                    | RRF Fusion Sorting|
-                                    | (Reciprocal Rank) |
+                                    |    ReAct Loop     |
+                                    |  (max 10 turns)   |
+                                    +---------+---------+
+                                              |       ^
+                                              v       |
+                                    +---------+---------+
+                                    | Documentation Tool|
+                                    | (Vector + Keyword)|
                                     +---------+---------+
                                               |
                                               v
                                     +---------+---------+
                                     | Generate Answer   |
-                                    | (Gemini Flash)    |
+                                    | (Source Citing)   |
                                     +---------+---------+
                                               |
                                               v
                                     +---------+---------+
-                                    | Update Cache with |
-                                    | New Q&A Pair      |
+                                    | Update Cache and  |
+                                    | Distributed Audit |
                                     +---------+---------+
                                               |
                                               v
@@ -79,18 +86,15 @@ The system follows a sequential interceptor and hybrid retrieval pattern:
 | Category | Technology | Strategy |
 | :--- | :--- | :--- |
 | **Core Framework** | Spring Boot 3.3.0 (Java 21) | Lightweight, local-first driver. |
-| **Orchestration** | LangChain4j | Manages embeddings, vector store, and Gemini API bindings. |
-| **Embedding Engine** | `all-miniLM-L6-v2` (ONNX) | Runs locally via JVM; zero network latency for embeddings. |
+| **Orchestration** | LangChain4j `AiServices` | Manages the ReAct loop and Tool execution. |
+| **Model Tiers** | Gemini 2.5/3.1/3.5 | Routes to Lite (Simple), Flash-Lite (Medium), or Flash (Complex). |
+| **Agent Logic** | ReAct + ChatMemory | Bounded to 10 messages to prevent infinite loops. |
 | **Vector Store** | PostgreSQL 16 + pgvector | Stores documentation chunks and semantic cache. |
-| **Keyword Search** | Postgres Full-Text Search | Uses `tsvector` with linguistic tokenization (stemming). |
-| **Fusion Algorithm** | Reciprocal Rank Fusion (RRF) | Merges vector and keyword ranks without manual weighting. |
-| **LLM Provider** | Gemini (Google AI Studio) | Preferred model: `gemini-1.5-flash` for speed/cost balance. |
+| **Audit Log** | PostgreSQL + Trace ID | Records tokens, costs, latency, and routing scores across calls. |
 
 ---
 
 ## 3. Database Schema
-
-The database is initialized via `schema.sql` and includes specialized indexes for both vector and keyword retrieval.
 
 ### 3.1. Knowledge Store (`ddb_knowledge_chunks`)
 Stores the vectorized fragments of the technical documentation.
@@ -101,81 +105,63 @@ CREATE TABLE ddb_knowledge_chunks (
     embedding VECTOR(384),
     text TEXT,
     metadata JSONB,
-    -- Managed Full-Text Tokens
     content_tokens tsvector GENERATED ALWAYS AS (to_tsvector('english', text)) STORED
 );
-
--- HNSW Index for semantic vector search
-CREATE INDEX ON ddb_knowledge_chunks USING hnsw (embedding vector_cosine_ops);
-
--- GIN Index for linguistic keyword search
-CREATE INDEX ON ddb_knowledge_chunks USING GIN(content_tokens);
 ```
 
-### 3.2. Semantic Cache (`ddb_semantic_cache`)
-Stores previously generated answers to prevent redundant LLM calls.
+### 3.2. Audit Logs (`request_audit_logs`)
+Links multiple LLM calls per request via `trace_id`.
 
 ```sql
-CREATE TABLE ddb_semantic_cache (
-    embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    original_query TEXT,
-    text TEXT, -- Stores the cached answer
-    embedding VECTOR(384), -- Vector of the original query
-    metadata JSONB,
+CREATE TABLE request_audit_logs (
+    audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id UUID,
+    query_text TEXT,
+    model_name TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_cost NUMERIC(18, 10),
+    complexity_score INTEGER,
+    ttft_ms BIGINT,
+    total_latency_ms BIGINT,
+    is_cache_hit BOOLEAN,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ---
 
-## 4. Subsystem Details
+## 4. ReAct Capabilities
 
-### 4.1. Hybrid Retrieval & RRF
-To solve the "technical term" problem where embeddings might miss specific keywords like "GSI" or "LSI", the system uses **Reciprocal Rank Fusion (RRF)**:
-1.  Perform **Vector Search** (top 10 results).
-2.  Perform **Keyword Search** (top 10 results using Postgres FTS).
-3.  Assign a score: $Score(d) = \sum \frac{1}{60 + rank(d)}$.
-4.  Sort by the combined score and pick the top 5 for the LLM context.
+### 4.1. Documentation Tool
+The agent has access to a `DocumentationTool` that performs a **Hybrid Search** (Vector + Keyword) on the knowledge store.
+- **Vector Search**: Captures semantic intent.
+- **Keyword Search**: Captures technical exactness (e.g. "GSI", "BatchWriteItem").
+- **Fusion**: Merges results via **Reciprocal Rank Fusion (RRF)**.
 
-### 4.2. Ingestion Pipeline
-*   **Source:** Local Markdown files in the `local_test_docs` directory.
-*   **Splitter:** Recursive text splitter (1000 character chunks, 200 character overlap).
-*   **Automation:** Postgres generated columns automatically update the keyword index (`tsvector`) whenever Java inserts a document.
+### 4.2. Reasoning & Citing
+The agent is instructed to:
+1.  Search the documentation for factual verification.
+2.  Synthesize the answer using both the tool output and its own knowledge.
+3.  **Explicitly state** which parts of the answer are from documentation and which are from its training data.
 
 ---
 
 ## 5. Implementation Roadmap
 
 ### Phase 1: Infrastructure & DB
-*   Docker Compose for PostgreSQL with `pgvector`.
-*   Schema initialization with HNSW and GIN indexes.
+*   Postgres + pgvector setup.
+*   Audit schema with trace_id and complexity scoring support.
 
-### Phase 2: Ingestion
-*   `IngestionService` for document loading and local embedding generation.
+### Phase 2: Hybrid Retrieval
+*   Postgres Full-Text Search (FTS) integration.
+*   RRF algorithm for merging search results.
 
-### Phase 3: Hybrid Search
-*   `KeywordSearchRepository` for Postgres FTS queries.
-*   `HybridSearchService` implementing the RRF fusion logic.
+### Phase 3: Dynamic Model Routing
+*   Complexity classifier using `gemini-2.5-flash-lite`.
+*   3-tier model selection strategy.
 
-### Phase 4: Routing & Generation
-*   `QueryRoutingService` managing the cache-first flow and RAG fallback.
-*   Integration with Gemini AI Studio.
-
----
-
-## 6. Useful PostgreSQL Queries
-
-### 6.1. Perform Keyword Search
-```sql
-SELECT text, ts_rank(content_tokens, plainto_tsquery('english', 'GSI partitions')) as rank
-FROM ddb_knowledge_chunks
-WHERE content_tokens @@ plainto_tsquery('english', 'GSI partitions')
-ORDER BY rank DESC LIMIT 5;
-```
-
-### 6.2. Inspect Metadata and Chunks
-```sql
-SELECT metadata->>'chunking_strategy' as strategy, LEFT(text, 100) as snippet 
-FROM ddb_knowledge_chunks 
-ORDER BY (metadata->>'timestamp')::timestamp DESC;
-```
+### Phase 4: ReAct Loop & Tools
+*   `DocumentationTool` implementation.
+*   Refactor to `AiServices` with 10-turn bounded memory.
+*   Source-aware system prompting.
