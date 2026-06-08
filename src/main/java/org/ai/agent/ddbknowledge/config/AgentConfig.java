@@ -40,6 +40,7 @@ public class AgentConfig {
         return GoogleAiGeminiChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(classifierModelName)
+                .listeners(java.util.Collections.singletonList(new org.ai.agent.ddbknowledge.audit.ChatModelAuditListener()))
                 .build();
     }
 
@@ -49,6 +50,7 @@ public class AgentConfig {
         return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(simpleTierModelName)
+                .listeners(java.util.Collections.singletonList(new org.ai.agent.ddbknowledge.audit.ChatModelAuditListener()))
                 .build();
     }
 
@@ -58,6 +60,7 @@ public class AgentConfig {
         return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(mediumTierModelName)
+                .listeners(java.util.Collections.singletonList(new org.ai.agent.ddbknowledge.audit.ChatModelAuditListener()))
                 .build();
     }
 
@@ -67,6 +70,7 @@ public class AgentConfig {
         return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(complexTierModelName)
+                .listeners(java.util.Collections.singletonList(new org.ai.agent.ddbknowledge.audit.ChatModelAuditListener()))
                 .build();
     }
 
