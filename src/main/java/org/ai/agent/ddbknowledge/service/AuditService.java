@@ -36,13 +36,14 @@ public class AuditService {
 
         String sql = """
             INSERT INTO request_audit_logs 
-            (query_text, model_name, input_tokens, output_tokens, total_tokens, 
+            (query_text, full_prompt, model_name, input_tokens, output_tokens, total_tokens, 
              input_cost, output_cost, total_cost, ttft_ms, total_latency_ms, is_cache_hit, trace_id, complexity_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
         jdbcTemplate.update(sql,
                 record.getQueryText(),
+                record.getFullPrompt(),
                 record.getModelName(),
                 record.getInputTokens(),
                 record.getOutputTokens(),

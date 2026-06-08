@@ -7,6 +7,7 @@ import lombok.Data;
 @Builder
 public class AuditRecord {
     private String queryText;
+    private String fullPrompt;
     private String modelName;
     private int inputTokens;
     private int outputTokens;

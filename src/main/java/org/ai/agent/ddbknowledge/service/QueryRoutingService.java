@@ -172,6 +172,7 @@ public class QueryRoutingService {
 
                             auditService.recordAudit(AuditRecord.builder()
                                     .queryText(query)
+                                    .fullPrompt(systemPrompt)
                                     .modelName(selectedModelName)
                                     .inputTokens(inputTokens)
                                     .outputTokens(outputTokens)
@@ -193,6 +194,7 @@ public class QueryRoutingService {
                             long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
                             auditService.recordAudit(AuditRecord.builder()
                                     .queryText(query)
+                                    .fullPrompt(systemPrompt)
                                     .modelName(selectedModelName)
                                     .inputTokens(0)
                                     .outputTokens(0)

@@ -44,6 +44,7 @@ CREATE TABLE request_audit_logs (
     audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trace_id UUID,
     query_text TEXT,
+    full_prompt TEXT,
     model_name TEXT,
     
     -- Token Metrics

@@ -54,6 +54,7 @@ public class ModelRoutingService {
 
             auditService.recordAudit(AuditRecord.builder()
                     .queryText(query)
+                    .fullPrompt(prompt)
                     .modelName(classifierModelName)
                     .inputTokens(response.tokenUsage().inputTokenCount())
                     .outputTokens(response.tokenUsage().outputTokenCount())
