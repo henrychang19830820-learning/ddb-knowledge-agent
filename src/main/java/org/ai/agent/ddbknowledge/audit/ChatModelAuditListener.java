@@ -29,6 +29,19 @@ public class ChatModelAuditListener implements ChatModelListener {
         log.info("Captured high-fidelity prompt turn. Thread: {}. Prompt length: {}", 
                 Thread.currentThread().getName(), formattedPrompt.length());
         AuditContextHolder.updateCapturedPrompt(formattedPrompt);
+
+        // Capture tool results
+        AuditContext context = AuditContextHolder.get();
+        if (context != null) {
+            for (ChatMessage message : messages) {
+                if (message instanceof ToolExecutionResultMessage toolResult) {
+                    context.getToolExecutions().stream()
+                            .filter(exec -> toolResult.id().equals(exec.get("id")))
+                            .findFirst()
+                            .ifPresent(exec -> exec.put("result", toolResult.text()));
+                }
+            }
+        }
     }
 
     @Override
