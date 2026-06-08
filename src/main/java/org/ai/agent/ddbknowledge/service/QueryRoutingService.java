@@ -145,10 +145,18 @@ public class QueryRoutingService {
                 
                 log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
 
-                String systemPrompt = "You are a DynamoDB expert. " +
-                        "You have access to a tool to search the official documentation. You should use it to look up specific technical details. " +
-                        "You may use your own training data to answer, but you MUST explicitly mention in your answer what information comes from the documentation context and what comes from your model training data. " +
-                        "Do not hallucinate technical specifications.";
+                String systemPrompt = "You are a DynamoDB expert. You have access to a tool to search the official documentation. You should use it to look up specific technical details.\n" +
+                        "\n" +
+                        "You MUST format your entire response using the following mandatory Markdown template:\n" +
+                        "\n" +
+                        "### 📚 From Official Documentation\n" +
+                        "[Provide information found ONLY using the search tool here. If the tool returned no results, state \"No specific documentation found for this query.\"]\n" +
+                        "\n" +
+                        "### 🧠 From Expert Knowledge\n" +
+                        "[Provide supplementary information from your own training data here to give a more complete or practical answer.]\n" +
+                        "\n" +
+                        "---\n" +
+                        "**Constraint:** Do not hallucinate technical specifications. If there is a conflict, always prioritize information from the documentation tool.";
 
                 Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
                         .streamingChatLanguageModel(selectedModel)
@@ -180,6 +188,15 @@ public class QueryRoutingService {
                             // Access the context via final local variable
                             String finalHighFidelityPrompt = auditContext.getCapturedPrompt();
 
+                            // Serialize tool executions
+                            String toolCallsJson = null;
+                            try {
+                                toolCallsJson = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .writeValueAsString(auditContext.getToolExecutions());
+                            } catch (Exception e) {
+                                log.warn("Failed to serialize tool calls for auditing [traceId={}]", traceId, e);
+                            }
+
                             int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
                             int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
 
@@ -194,6 +211,7 @@ public class QueryRoutingService {
                                     .isCacheHit(false)
                                     .traceId(traceId)
                                     .complexityScore(complexityScore)
+                                    .toolCallsJson(toolCallsJson)
                                     .build());
 
                             log.info("Updating semantic cache with new answer [traceId={}]", traceId);
@@ -209,6 +227,15 @@ public class QueryRoutingService {
                             
                             String finalHighFidelityPrompt = auditContext.getCapturedPrompt();
 
+                            // Serialize tool executions
+                            String toolCallsJson = null;
+                            try {
+                                toolCallsJson = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .writeValueAsString(auditContext.getToolExecutions());
+                            } catch (Exception e) {
+                                log.warn("Failed to serialize tool calls for auditing [traceId={}]", traceId, e);
+                            }
+
                             auditService.recordAudit(AuditRecord.builder()
                                     .queryText(query)
                                     .fullPrompt(finalHighFidelityPrompt)
@@ -220,6 +247,7 @@ public class QueryRoutingService {
                                     .isCacheHit(false)
                                     .traceId(traceId)
                                     .complexityScore(complexityScore)
+                                    .toolCallsJson(toolCallsJson)
                                     .build());
                             handler.onError(error);
                         })
