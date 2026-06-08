@@ -13,6 +13,8 @@ import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
+import org.ai.agent.ddbknowledge.audit.AuditContext;
+import org.ai.agent.ddbknowledge.audit.AuditContextHolder;
 import org.ai.agent.ddbknowledge.dto.AuditRecord;
 import org.ai.agent.ddbknowledge.tool.DocumentationTool;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -54,9 +56,6 @@ public class QueryRoutingService {
     @Value("${agent.routing.complex-tier-model}")
     private String complexTierModelName;
 
-    interface Assistant {
-        TokenStream chat(String message);
-    }
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
                               @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
@@ -76,6 +75,10 @@ public class QueryRoutingService {
         this.auditService = auditService;
     }
 
+    interface Assistant {
+        TokenStream chat(String message);
+    }
+
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
         String traceId = UUID.randomUUID().toString();
         log.info("Processing streaming query [traceId={}]: {}", traceId, query);
@@ -83,6 +86,10 @@ public class QueryRoutingService {
 
         // Run in background thread to return SseEmitter immediately and prevent connection blocking
         new Thread(() -> {
+            // Capture context in a final variable to be accessed by callbacks safely
+            final AuditContext auditContext = AuditContext.builder().traceId(traceId).build();
+            AuditContextHolder.set(auditContext);
+            
             try {
                 // 1. Generate Query Embedding (Needed for cache)
                 Embedding queryEmbedding = embeddingModel.embed(query).content();
@@ -102,6 +109,7 @@ public class QueryRoutingService {
                     long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
                     auditService.recordAudit(AuditRecord.builder()
                             .queryText(query)
+                            .fullPrompt("CACHE_HIT")
                             .modelName(simpleTierModelName)
                             .inputTokens(0)
                             .outputTokens(0)
@@ -118,7 +126,7 @@ public class QueryRoutingService {
 
                 log.info("CACHE_MISS [traceId={}]: Proceeding to ReAct loop", traceId);
 
-                // 4. Dynamic Model Selection (This part also takes time)
+                // 4. Dynamic Model Selection
                 int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
                 
                 StreamingChatLanguageModel selectedModel;
@@ -154,7 +162,9 @@ public class QueryRoutingService {
                 long[] ttft = new long[]{0};
 
                 log.info("Starting native ReAct TokenStream [traceId={}]", traceId);
-                assistant.chat(query)
+                TokenStream stream = assistant.chat(query);
+
+                stream
                         .onNext(token -> {
                             if (firstTokenReceived.compareAndSet(false, true)) {
                                 ttft[0] = (System.nanoTime() - startTime) / 1_000_000;
@@ -165,14 +175,17 @@ public class QueryRoutingService {
                         })
                         .onComplete(response -> {
                             long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                            log.info("Native stream completed [traceId={}] in {}ms", traceId, totalLatency);
+                            log.info("TokenStream completed [traceId={}] in {}ms", traceId, totalLatency);
                             
+                            // Access the context via final local variable
+                            String finalHighFidelityPrompt = auditContext.getCapturedPrompt();
+
                             int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
                             int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
 
                             auditService.recordAudit(AuditRecord.builder()
                                     .queryText(query)
-                                    .fullPrompt(systemPrompt + "\n\nUser Query: " + query)
+                                    .fullPrompt(finalHighFidelityPrompt)
                                     .modelName(selectedModelName)
                                     .inputTokens(inputTokens)
                                     .outputTokens(outputTokens)
@@ -183,18 +196,22 @@ public class QueryRoutingService {
                                     .complexityScore(complexityScore)
                                     .build());
 
+                            log.info("Updating semantic cache with new answer [traceId={}]", traceId);
                             Metadata metadata = new Metadata();
                             metadata.put("original_query", query);
                             cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
 
-                            handler.onComplete(Response.from(AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
+                            handler.onComplete(Response.from(dev.langchain4j.data.message.AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
                         })
                         .onError(error -> {
                             log.error("Native Streaming Error [traceId={}]", traceId, error);
                             long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                            
+                            String finalHighFidelityPrompt = auditContext.getCapturedPrompt();
+
                             auditService.recordAudit(AuditRecord.builder()
                                     .queryText(query)
-                                    .fullPrompt(systemPrompt + "\n\nUser Query: " + query)
+                                    .fullPrompt(finalHighFidelityPrompt)
                                     .modelName(selectedModelName)
                                     .inputTokens(0)
                                     .outputTokens(0)
@@ -210,6 +227,8 @@ public class QueryRoutingService {
             } catch (Exception e) {
                 log.error("Error in async askStreaming [traceId={}]", traceId, e);
                 handler.onError(e);
+            } finally {
+                AuditContextHolder.clear();
             }
         }).start();
     }

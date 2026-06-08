@@ -6,6 +6,7 @@ import dev.langchain4j.model.output.Response;
 import dev.langchain4j.data.message.AiMessage;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.ai.agent.ddbknowledge.audit.AuditContextHolder;
 import org.ai.agent.ddbknowledge.dto.AuditRecord;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,7 +55,7 @@ public class ModelRoutingService {
 
             auditService.recordAudit(AuditRecord.builder()
                     .queryText(query)
-                    .fullPrompt(prompt)
+                    .fullPrompt(AuditContextHolder.get() != null ? AuditContextHolder.get().getCapturedPrompt() : null)
                     .modelName(classifierModelName)
                     .inputTokens(response.tokenUsage().inputTokenCount())
                     .outputTokens(response.tokenUsage().outputTokenCount())
@@ -69,11 +70,13 @@ public class ModelRoutingService {
             log.error("Error evaluating query complexity, defaulting to complex", e);
             auditService.recordAudit(AuditRecord.builder()
                     .queryText(query)
+                    .fullPrompt(AuditContextHolder.get() != null ? AuditContextHolder.get().getCapturedPrompt() : null)
                     .modelName(classifierModelName)
                     .inputTokens(0)
                     .outputTokens(0)
                     .totalLatencyMs(System.currentTimeMillis() - startTime)
                     .traceId(traceId)
+                    .complexityScore(10)
                     .build());
             return 10; // Default to max score to route to complex tier
         }

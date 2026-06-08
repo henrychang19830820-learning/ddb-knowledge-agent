@@ -21,7 +21,8 @@ public class ChatModelAuditListener implements ChatModelListener {
                 .map(msg -> String.format("[%s]: %s", msg.type(), msg.text()))
                 .collect(Collectors.joining("\n\n"));
         
-        log.debug("Captured high-fidelity prompt turn");
+        log.info("Captured high-fidelity prompt turn. Thread: {}. Prompt length: {}", 
+                Thread.currentThread().getName(), formattedPrompt.length());
         AuditContextHolder.updateCapturedPrompt(formattedPrompt);
     }
 
