@@ -23,11 +23,22 @@ public class DocumentationTool {
         log.info("TOOL_START: searchDocumentation for query '{}'", query);
         List<EmbeddingMatch<TextSegment>> matches = hybridSearchService.search(query, 5);
         log.info("TOOL_END: Found {} matches for query '{}'", matches.size(), query);
+        
+        String result;
         if (matches.isEmpty()) {
-            return "No relevant documentation found for the query.";
+            result = "No relevant documentation found for the query.";
+        } else {
+            result = matches.stream()
+                    .map(match -> match.embedded().text())
+                    .collect(Collectors.joining("\n\n"));
         }
-        return matches.stream()
-                .map(match -> match.embedded().text())
-                .collect(Collectors.joining("\n\n"));
+
+        // Directly record execution to AuditContext for high-fidelity logs
+        org.ai.agent.ddbknowledge.audit.AuditContext context = org.ai.agent.ddbknowledge.audit.AuditContextHolder.get();
+        if (context != null) {
+            context.addToolExecution("searchDocumentation", query, result);
+        }
+
+        return result;
     }
 }
