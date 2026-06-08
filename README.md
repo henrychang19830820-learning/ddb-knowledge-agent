@@ -2,6 +2,68 @@
 
 A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a high-speed **Semantic Cache**, an intelligent **Model Router**, and a **ReAct Reasoning Loop** that decides when to search official documentation via **Hybrid Search (Vector + FTS)**.
 
+## 🏗 System Architecture
+
+```text
+┌─────────────────┐      ┌──────────────────────────────────────────────────────────┐      ┌───────────────────────────┐
+│   Browser UI    │ <──> │                 Spring Boot Application                  │ <──> │      Gemini AI Models     │
+└─────────────────┘      │                                                          │      │ (Google AI Studio)        │
+                         │  ┌──────────────────┐      ┌──────────────────────────┐  │      │                           │
+                         │  │ QueryController  │ <──> │   QueryRoutingService    │ <────> │ 1. Classifier (3.1 Lite)  │
+                         │  └──────────────────┘      └────────────┬─────────────┘  │      │ 2. Simple     (3.1 Lite)  │
+                                   ^                               │                │      │ 3. Medium     (2.5 Flash) │
+                                   │                               v                │      │ 4. Complex    (3.5 Flash) │
+                         │  ┌──────┴───────────┐      ┌────────────┴─────────────┐  │      └───────────────────────────┘
+                         │  │ IngestionService │      │   ModelRoutingService    │  │
+                         │  └──────┬───────────┘      └────────────┬─────────────┘  │
+                                   │                               │                │
+                         │  ┌──────v───────────┐      ┌────────────v─────────────┐  │      ┌───────────────────────────┐
+                         │  │  EmbeddingModel  │      │    DocumentationTool     │  │ <──> │   PostgreSQL + pgvector   │
+                         │  └──────┬───────────┘      └────────────┬─────────────┘  │      │                           │
+                                   │                               │                │      │ 1. ddb_knowledge_chunks   │
+                         │  ┌──────v───────────┐      ┌────────────v─────────────┐  │      │ 2. ddb_semantic_cache     │
+                         │  │   AuditService   │ <──> │      EmbeddingStore      │  │ <──> │ 3. request_audit_logs     │
+                         │  └──────────────────┘      └──────────────────────────┘  │      └───────────────────────────┘
+                         └──────────────────────────────────────────────────────────┘
+```
+
+## 🔄 Request Lifecycle
+
+```text
+       USER QUESTION
+             │
+             v
+   ┌───────────────────┐        YES       ┌───────────────────┐
+   │  Semantic Cache   ├─────────────────>│  Return Answer    │
+   │      Check        │                  │   (Latency <10ms) │
+   └─────────┬─────────┘                  └───────────────────┘
+             │ NO (Cache Miss)
+             v
+   ┌───────────────────┐
+   │ Dynamic Routing   │ Evaluate Complexity (1-10)
+   │ (Gemini 3.1 Lite) │ via ModelRoutingService
+   └─────────┬─────────┘
+             │
+             v
+   ┌───────────────────┐
+   │    ReAct Loop     │ 1. Reason: "Do I need documentation?"
+   │  (AiServices)     │ 2. Act: Call searchDocumentation()
+   │  [Max 10 turns]   │ 3. Observe: Process Hybrid Search results
+   └─────────┬─────────┘
+             │
+             v
+   ┌───────────────────┐
+   │  Generate Answer  │ Formatted with mandatory 📚 and 🧠 
+   │ (Selected Tier)   │ headers for source attribution.
+   └─────────┬─────────┘
+             │
+             v
+   ┌───────────────────┐
+   │ Distributed Audit │ Link Routing + Generation logs 
+   │  & Cache Update   │ via Trace ID in PostgreSQL.
+   └───────────────────┘
+```
+
 ## 🚀 Getting Started
 
 ### Prerequisites
