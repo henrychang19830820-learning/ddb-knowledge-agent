@@ -1,6 +1,6 @@
 # DDB Knowledge Agent
 
-A local-first, **Hybrid RAG** (Retrieval-Augmented Generation) technical assistant for Amazon DynamoDB. It features a dual-layer architecture: a high-speed **Semantic Cache** and a **Hybrid Retrieval** engine combining Vector Search (`pgvector`) and Keyword Search (Postgres FTS) via **Reciprocal Rank Fusion (RRF)**.
+A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a high-speed **Semantic Cache**, an intelligent **Model Router**, and a **ReAct Reasoning Loop** that decides when to search official documentation via **Hybrid Search (Vector + FTS)**.
 
 ## 🚀 Getting Started
 
@@ -39,39 +39,47 @@ Start the technical assistant. Documentation ingestion from the `local_test_docs
 ./gradlew bootRun
 ```
 
-Once started, the application will log access URLs:
-* **Local UI:** [http://localhost:8090](http://localhost:8090)
-* **PGWeb UI:** [http://localhost:5433](http://localhost:5433)
+Access the UI at: [http://localhost:8090](http://localhost:8090)
 
 ## 🧪 Testing the Agent
 
 ### Trigger Ingestion
-Before asking questions, populate the knowledge base with the local documentation:
+Before asking questions, populate the knowledge base:
 ```bash
 curl -X POST "http://localhost:8090/ingest"
 ```
 
-### Ask a Technical Question (Hybrid RAG)
-The agent will use both semantic understanding and keyword matching to find the best documentation:
+### Ask a Technical Question (Streaming)
+The agent uses a ReAct loop to decide if it needs to search documentation:
 ```bash
-curl "http://localhost:8090/ask?question=How+to+handle+hot+partitions+in+DynamoDB?"
+curl -N "http://localhost:8090/ask-stream?question=How+to+setup+a+GSI%3F"
 ```
 
 ### Verify Semantic Cache
-Ask a similar question; if the similarity score is > 0.92, it hits the cache (< 10ms):
+Ask the same question again; it will hit the cache (< 10ms):
 ```bash
-curl "http://localhost:8090/ask?question=What+should+I+do+with+hot+partitions?"
+curl -N "http://localhost:8090/ask-stream?question=How+to+setup+a+GSI%3F"
 ```
 
 ## 🛠 Hybrid ReAct Architecture
-The agent uses a **Reasoning + Acting (ReAct)** loop powered by LangChain4j `AiServices`.
-*   **Documentation Tool:** The agent has a native tool to perform **Hybrid Search** (Vector + Keyword) on documentation.
-*   **Bounded Memory:** The ReAct loop is limited to **10 turns** to ensure responsiveness and prevent runaway loops.
-*   **Source Awareness:** The agent is instructed to explicitly distinguish between information from the documentation vs. its own training data.
-*   **Dynamic Routing:** Based on query complexity (1-10), requests are routed to Simple, Medium, or Complex model tiers.
-*   **Distributed Auditing:** All model calls are linked via a `trace_id` for full cost and latency analysis.
+The agent leverages LangChain4j `AiServices` to provide an autonomous reasoning loop.
 
-## 📊 Database Management
+1.  **Semantic Cache**: Intercepts queries with >0.92 similarity to previously answered questions.
+2.  **Model Routing**: Evaluates query complexity (1-10) and routes to the optimal tier:
+    *   **Simple (1-3)**: `gemini-3.1-flash-lite` (Fast/Cheap)
+    *   **Medium (4-6)**: `gemini-2.5-flash`
+    *   **Complex (7-10)**: `gemini-3.5-flash` (Highest Reasoning)
+3.  **Documentation Tool**: A native tool that performs **Hybrid Search** (Vector + Postgres Full-Text Search) merged via **RRF (Reciprocal Rank Fusion)**.
+4.  **Source Attribution**: The agent is strictly instructed to separate information from the documentation vs. its own training data using Markdown headers.
+
+## 📊 Database Management & Auditing
 Use **pgweb** at [http://localhost:5433](http://localhost:5433) to inspect:
-* `ddb_knowledge_chunks`: Stores documentation with an automated `tsvector` column.
-* `ddb_semantic_cache`: Stores Q&A pairs for fast lookup.
+* `ddb_knowledge_chunks`: Stores vectorized documentation with `tsvector` support.
+* `ddb_semantic_cache`: Stores previously generated high-quality answers.
+* `request_audit_logs`: Detailed tracking of every model call, including:
+    * `trace_id`: Links multiple model calls (Routing + Generation) in a single request.
+    * `complexity_score`: The 1-10 score that determined the model tier.
+    * `full_prompt`: The **actual** structural payload sent to the model (captured via `ChatModelListener`).
+    * `tool_calls`: JSON array of every documentation search performed (query + results).
+    * `total_cost`: Accurate USD cost calculation based on latest Gemini rates.
+    * `ttft_ms`: **Real physical Time To First Token** arrival.
