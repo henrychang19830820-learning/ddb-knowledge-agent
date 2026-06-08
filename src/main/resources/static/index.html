@@ -296,13 +296,17 @@
 
             currentRawResponse = '';
 
-            // Handle newline issues in SSE by using a custom decoder if needed, but EventSource usually joins multiline data with \n.
-            // If the server replaces \n, we'd handle it. Here we assume standard SSE.
             const eventSource = new EventSource(`/ask-stream?question=${encodeURIComponent(question)}`);
             
+            eventSource.addEventListener('metadata', (event) => {
+                console.log('Metadata received:', event.data);
+                aiMsgDiv.innerHTML = `<span class="typing">${event.data}</span>`;
+            });
+
             eventSource.addEventListener('token', (event) => {
                 // Decode the safe token sent by the server to preserve newlines
                 let tokenText = event.data.replace(/%0A/g, '\n');
+                if (currentRawResponse === '') aiMsgDiv.innerHTML = ''; 
                 
                 currentRawResponse += tokenText;
                 

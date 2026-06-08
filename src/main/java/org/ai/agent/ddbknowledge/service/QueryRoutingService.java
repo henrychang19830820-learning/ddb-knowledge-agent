@@ -5,7 +5,6 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
@@ -79,130 +78,138 @@ public class QueryRoutingService {
 
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
         String traceId = UUID.randomUUID().toString();
-        log.info("Processing streaming request [traceId={}]: {}", traceId, query);
+        log.info("Processing streaming query [traceId={}]: {}", traceId, query);
         long startTime = System.nanoTime();
 
-        // 1. Generate Query Embedding (Needed for cache)
-        Embedding queryEmbedding = embeddingModel.embed(query).content();
+        // Run in background thread to return SseEmitter immediately and prevent connection blocking
+        new Thread(() -> {
+            try {
+                // 1. Generate Query Embedding (Needed for cache)
+                Embedding queryEmbedding = embeddingModel.embed(query).content();
 
-        // 2. Check Semantic Cache
-        EmbeddingSearchRequest cacheSearchRequest = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(1)
-                .minScore(cacheThreshold)
-                .build();
-        List<EmbeddingMatch<TextSegment>> cacheMatches = cacheStore.search(cacheSearchRequest).matches();
+                // 2. Check Semantic Cache
+                EmbeddingSearchRequest cacheSearchRequest = EmbeddingSearchRequest.builder()
+                        .queryEmbedding(queryEmbedding)
+                        .maxResults(1)
+                        .minScore(cacheThreshold)
+                        .build();
+                List<EmbeddingMatch<TextSegment>> cacheMatches = cacheStore.search(cacheSearchRequest).matches();
 
-        if (!cacheMatches.isEmpty()) {
-            log.info("CACHE_HIT [traceId={}]: Found similar query with score {}", traceId, cacheMatches.get(0).score());
-            String cachedAnswer = cacheMatches.get(0).embedded().text();
-            
-            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-            auditService.recordAudit(AuditRecord.builder()
-                    .queryText(query)
-                    .modelName(simpleTierModelName)
-                    .inputTokens(0)
-                    .outputTokens(0)
-                    .ttftMs(totalLatency)
-                    .totalLatencyMs(totalLatency)
-                    .isCacheHit(true)
-                    .traceId(traceId)
-                    .build());
-            
-            handler.onNext(cachedAnswer);
-            handler.onComplete(Response.from(AiMessage.from(cachedAnswer)));
-            return;
-        }
-
-        log.info("CACHE_MISS [traceId={}]: Proceeding to ReAct loop", traceId);
-
-        // 4. Dynamic Model Selection
-        int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
-        
-        StreamingChatLanguageModel selectedModel;
-        String selectedModelName;
-
-        if (complexityScore <= simpleThreshold) {
-            selectedModel = simpleChatModel;
-            selectedModelName = simpleTierModelName;
-        } else if (complexityScore <= mediumThreshold) {
-            selectedModel = mediumChatModel;
-            selectedModelName = mediumTierModelName;
-        } else {
-            selectedModel = complexChatModel;
-            selectedModelName = complexTierModelName;
-        }
-        
-        log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
-
-        String systemPrompt = "You are a DynamoDB expert. " +
-                "You have access to a tool to search the official documentation. You should use it to look up specific technical details. " +
-                "You may use your own training data to answer, but you MUST explicitly mention in your answer what information comes from the documentation context and what comes from your model training data. " +
-                "Do not hallucinate technical specifications.";
-
-        Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
-                .streamingChatLanguageModel(selectedModel)
-                .chatMemory(dev.langchain4j.memory.chat.MessageWindowChatMemory.withMaxMessages(10))
-                .tools(documentationTool)
-                .systemMessageProvider(chatMemoryId -> systemPrompt)
-                .build();
-
-        StringBuilder fullResponse = new StringBuilder();
-        AtomicBoolean firstTokenReceived = new AtomicBoolean(false);
-        long[] ttft = new long[]{0};
-
-        log.info("Starting native ReAct TokenStream [traceId={}]", traceId);
-        assistant.chat(query)
-                .onNext(token -> {
-                    if (firstTokenReceived.compareAndSet(false, true)) {
-                        ttft[0] = (System.nanoTime() - startTime) / 1_000_000;
-                        log.info("Real First Token received [traceId={}] at {}ms", traceId, ttft[0]);
-                    }
-                    fullResponse.append(token);
-                    handler.onNext(token);
-                })
-                .onComplete(response -> {
-                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                    log.info("Native stream completed [traceId={}] in {}ms", traceId, totalLatency);
+                if (!cacheMatches.isEmpty()) {
+                    log.info("CACHE_HIT [traceId={}]: Found similar query with score {}", traceId, cacheMatches.get(0).score());
+                    String cachedAnswer = cacheMatches.get(0).embedded().text();
                     
-                    int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
-                    int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
-
-                    auditService.recordAudit(AuditRecord.builder()
-                            .queryText(query)
-                            .modelName(selectedModelName)
-                            .inputTokens(inputTokens)
-                            .outputTokens(outputTokens)
-                            .ttftMs(ttft[0])
-                            .totalLatencyMs(totalLatency)
-                            .isCacheHit(false)
-                            .traceId(traceId)
-                            .complexityScore(complexityScore)
-                            .build());
-
-                    Metadata metadata = new Metadata();
-                    metadata.put("original_query", query);
-                    cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
-
-                    handler.onComplete(Response.from(AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
-                })
-                .onError(error -> {
-                    log.error("Native Streaming Error [traceId={}]", traceId, error);
                     long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
                     auditService.recordAudit(AuditRecord.builder()
                             .queryText(query)
-                            .modelName(selectedModelName)
+                            .modelName(simpleTierModelName)
                             .inputTokens(0)
                             .outputTokens(0)
-                            .ttftMs(ttft[0])
+                            .ttftMs(totalLatency)
                             .totalLatencyMs(totalLatency)
-                            .isCacheHit(false)
+                            .isCacheHit(true)
                             .traceId(traceId)
-                            .complexityScore(complexityScore)
                             .build());
-                    handler.onError(error);
-                })
-                .start();
+                    
+                    handler.onNext(cachedAnswer);
+                    handler.onComplete(Response.from(AiMessage.from(cachedAnswer)));
+                    return;
+                }
+
+                log.info("CACHE_MISS [traceId={}]: Proceeding to ReAct loop", traceId);
+
+                // 4. Dynamic Model Selection (This part also takes time)
+                int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
+                
+                StreamingChatLanguageModel selectedModel;
+                String selectedModelName;
+
+                if (complexityScore <= simpleThreshold) {
+                    selectedModel = simpleChatModel;
+                    selectedModelName = simpleTierModelName;
+                } else if (complexityScore <= mediumThreshold) {
+                    selectedModel = mediumChatModel;
+                    selectedModelName = mediumTierModelName;
+                } else {
+                    selectedModel = complexChatModel;
+                    selectedModelName = complexTierModelName;
+                }
+                
+                log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
+
+                String systemPrompt = "You are a DynamoDB expert. " +
+                        "You have access to a tool to search the official documentation. You should use it to look up specific technical details. " +
+                        "You may use your own training data to answer, but you MUST explicitly mention in your answer what information comes from the documentation context and what comes from your model training data. " +
+                        "Do not hallucinate technical specifications.";
+
+                Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
+                        .streamingChatLanguageModel(selectedModel)
+                        .chatMemory(dev.langchain4j.memory.chat.MessageWindowChatMemory.withMaxMessages(10))
+                        .tools(documentationTool)
+                        .systemMessageProvider(chatMemoryId -> systemPrompt)
+                        .build();
+
+                StringBuilder fullResponse = new StringBuilder();
+                AtomicBoolean firstTokenReceived = new AtomicBoolean(false);
+                long[] ttft = new long[]{0};
+
+                log.info("Starting native ReAct TokenStream [traceId={}]", traceId);
+                assistant.chat(query)
+                        .onNext(token -> {
+                            if (firstTokenReceived.compareAndSet(false, true)) {
+                                ttft[0] = (System.nanoTime() - startTime) / 1_000_000;
+                                log.info("Real First Token received [traceId={}] at {}ms", traceId, ttft[0]);
+                            }
+                            fullResponse.append(token);
+                            handler.onNext(token);
+                        })
+                        .onComplete(response -> {
+                            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                            log.info("Native stream completed [traceId={}] in {}ms", traceId, totalLatency);
+                            
+                            int inputTokens = response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0;
+                            int outputTokens = response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0;
+
+                            auditService.recordAudit(AuditRecord.builder()
+                                    .queryText(query)
+                                    .modelName(selectedModelName)
+                                    .inputTokens(inputTokens)
+                                    .outputTokens(outputTokens)
+                                    .ttftMs(ttft[0])
+                                    .totalLatencyMs(totalLatency)
+                                    .isCacheHit(false)
+                                    .traceId(traceId)
+                                    .complexityScore(complexityScore)
+                                    .build());
+
+                            Metadata metadata = new Metadata();
+                            metadata.put("original_query", query);
+                            cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
+
+                            handler.onComplete(Response.from(AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
+                        })
+                        .onError(error -> {
+                            log.error("Native Streaming Error [traceId={}]", traceId, error);
+                            long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                            auditService.recordAudit(AuditRecord.builder()
+                                    .queryText(query)
+                                    .modelName(selectedModelName)
+                                    .inputTokens(0)
+                                    .outputTokens(0)
+                                    .ttftMs(ttft[0])
+                                    .totalLatencyMs(totalLatency)
+                                    .isCacheHit(false)
+                                    .traceId(traceId)
+                                    .complexityScore(complexityScore)
+                                    .build());
+                            handler.onError(error);
+                        })
+                        .start();
+            } catch (Exception e) {
+                log.error("Error in async askStreaming [traceId={}]", traceId, e);
+                handler.onError(e);
+            }
+        }).start();
     }
 
     public void clearCache() {

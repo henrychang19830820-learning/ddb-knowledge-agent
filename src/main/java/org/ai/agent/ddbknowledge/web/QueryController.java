@@ -65,14 +65,21 @@ public class QueryController {
 
     @GetMapping("/ask-stream")
     public SseEmitter askStream(@RequestParam String question) {
-        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout for ReAct loop
+        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
         
+        // Send initial event to bypass browser buffering and confirm connection
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("metadata")
+                    .data("Connected... evaluating query complexity."));
+        } catch (java.io.IOException e) {
+            log.error("Failed to send initial metadata", e);
+        }
+
         queryRoutingService.askStreaming(question, new StreamingResponseHandler<AiMessage>() {
             @Override
             public void onNext(String token) {
-                log.debug("Streaming token: {}", token);
                 try {
-                    // SSE drops literal newlines in data fields. We encode them to preserve formatting.
                     String safeToken = token.replace("\n", "%0A");
                     emitter.send(SseEmitter.event()
                             .name("token")
