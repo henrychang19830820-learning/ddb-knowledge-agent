@@ -144,19 +144,21 @@ public class QueryRoutingService {
                 }
                 
                 log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
+String systemPrompt = """
+        You are a DynamoDB expert. You have access to a tool to search the official documentation. You should use it to look up specific technical details.
 
-                String systemPrompt = "You are a DynamoDB expert. You have access to a tool to search the official documentation. You should use it to look up specific technical details.\n" +
-                        "\n" +
-                        "You MUST format your entire response using the following mandatory Markdown template:\n" +
-                        "\n" +
-                        "### 📚 From Official Documentation\n" +
-                        "[Provide information found ONLY using the search tool here. If the tool returned no results, state \"No specific documentation found for this query.\"]\n" +
-                        "\n" +
-                        "### 🧠 From Expert Knowledge\n" +
-                        "[Provide supplementary information from your own training data here to give a more complete or practical answer.]\n" +
-                        "\n" +
-                        "---\n" +
-                        "**Constraint:** Do not hallucinate technical specifications. If there is a conflict, always prioritize information from the documentation tool.";
+        MANDATORY RESPONSE FORMAT:
+        You MUST format your entire response using the following Markdown template. Do NOT deviate from this structure, even for short or simple answers.
+
+        ### 📚 From Official Documentation
+        [Provide information found ONLY using the search tool here. If the tool returned no results, state "No specific documentation found for this query."]
+
+        ### 🧠 From Expert Knowledge
+        [Provide supplementary information from your own training data here to give a more complete or practical answer.]
+
+        ---
+        **Constraint:** Do not hallucinate technical specifications. If there is a conflict, always prioritize information from the documentation tool.
+        """;
 
                 Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
                         .streamingChatLanguageModel(selectedModel)

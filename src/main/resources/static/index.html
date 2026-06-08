@@ -111,74 +111,41 @@
             border-bottom-left-radius: 0.2rem;
         }
 
-        .error-message {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+        /* Improved Markdown formatting for AI responses */
+        .ai-message h3 {
+            margin: 1rem 0 0.5rem 0;
+            font-size: 1.1rem;
+            color: #000;
         }
-
-        .typing {
-            font-style: italic;
-            color: var(--text-light);
-            font-size: 0.85rem;
-            margin-bottom: 0.5rem;
+        .ai-message h3:first-child {
+            margin-top: 0;
         }
-
-        footer {
-            background-color: var(--chat-bg);
-            padding: 1rem;
-            border-top: 1px solid var(--border);
-            display: flex;
-            gap: 0.8rem;
+        .ai-message p {
+            margin-bottom: 0.75rem;
         }
-
-        #question-input {
-            flex: 1;
-            padding: 0.75rem 1rem;
-            border: 1px solid var(--border);
-            border-radius: 2rem;
-            outline: none;
-            transition: border-color 0.2s;
+        .ai-message p:last-child {
+            margin-bottom: 0;
         }
-
-        #question-input:focus {
-            border-color: var(--user-bubble);
+        .ai-message ul, .ai-message ol {
+            margin: 0.5rem 0 0.75rem 1.5rem;
         }
-
-        #send-btn {
-            background-color: var(--user-bubble);
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 2rem;
-            cursor: pointer;
-            font-weight: 600;
-            transition: background-color 0.2s;
+        .ai-message li {
+            margin-bottom: 0.25rem;
         }
-
-        #send-btn:hover {
-            background-color: #0056b3;
-        }
-
-        #send-btn:disabled {
-            background-color: var(--border);
-            cursor: not-allowed;
-        }
-
-        /* Markdown-ish formatting for AI responses */
         .ai-message pre {
             background: #f8f9fa;
-            padding: 0.5rem;
+            padding: 0.8rem;
             border-radius: 0.4rem;
-            margin: 0.5rem 0;
+            margin: 0.8rem 0;
             overflow-x: auto;
             font-size: 0.85rem;
+            border: 1px solid var(--border);
         }
-
         .ai-message code {
             background: rgba(0,0,0,0.05);
             padding: 0.1rem 0.3rem;
             border-radius: 0.2rem;
+            font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
         }
     </style>
 </head>
