@@ -6,6 +6,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
@@ -26,9 +27,9 @@ import java.util.UUID;
 public class QueryRoutingService {
 
     private final ModelRoutingService modelRoutingService;
-    private final ChatLanguageModel simpleChatModel;
-    private final ChatLanguageModel mediumChatModel;
-    private final ChatLanguageModel complexChatModel;
+    private final StreamingChatLanguageModel simpleChatModel;
+    private final StreamingChatLanguageModel mediumChatModel;
+    private final StreamingChatLanguageModel complexChatModel;
     private final EmbeddingModel embeddingModel;
     private final EmbeddingStore<TextSegment> cacheStore;
     private final DocumentationTool documentationTool;
@@ -57,9 +58,9 @@ public class QueryRoutingService {
     }
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
-                              @Qualifier("simpleChatModel") ChatLanguageModel simpleChatModel,
-                              @Qualifier("mediumChatModel") ChatLanguageModel mediumChatModel,
-                              @Qualifier("complexChatModel") ChatLanguageModel complexChatModel,
+                              @Qualifier("simpleChatModel") StreamingChatLanguageModel simpleChatModel,
+                              @Qualifier("mediumChatModel") StreamingChatLanguageModel mediumChatModel,
+                              @Qualifier("complexChatModel") StreamingChatLanguageModel complexChatModel,
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
                               DocumentationTool documentationTool,
@@ -116,7 +117,7 @@ public class QueryRoutingService {
         // 4. Dynamic Model Selection
         int complexityScore = modelRoutingService.getComplexityScore(query, traceId);
         
-        ChatLanguageModel selectedModel;
+        StreamingChatLanguageModel selectedModel;
         String selectedModelName;
 
         if (complexityScore <= simpleThreshold) {
@@ -138,7 +139,7 @@ public class QueryRoutingService {
                 "Do not hallucinate technical specifications.";
 
         Assistant assistant = dev.langchain4j.service.AiServices.builder(Assistant.class)
-                .chatLanguageModel(selectedModel)
+                .streamingChatLanguageModel(selectedModel)
                 .chatMemory(dev.langchain4j.memory.chat.MessageWindowChatMemory.withMaxMessages(10))
                 .tools(documentationTool)
                 .systemMessageProvider(chatMemoryId -> systemPrompt)

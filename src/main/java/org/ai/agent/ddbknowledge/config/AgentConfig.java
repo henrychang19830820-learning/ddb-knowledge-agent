@@ -2,9 +2,11 @@ package org.ai.agent.ddbknowledge.config;
 
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.pgvector.DefaultMetadataStorageConfig;
 import dev.langchain4j.store.embedding.pgvector.MetadataStorageMode;
@@ -43,8 +45,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("simpleChatModel")
-    public ChatLanguageModel simpleChatModel() {
-        return GoogleAiGeminiChatModel.builder()
+    public StreamingChatLanguageModel simpleChatModel() {
+        return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(simpleTierModelName)
                 .build();
@@ -52,8 +54,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("mediumChatModel")
-    public ChatLanguageModel mediumChatModel() {
-        return GoogleAiGeminiChatModel.builder()
+    public StreamingChatLanguageModel mediumChatModel() {
+        return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(mediumTierModelName)
                 .build();
@@ -61,8 +63,8 @@ public class AgentConfig {
 
     @Bean
     @org.springframework.beans.factory.annotation.Qualifier("complexChatModel")
-    public ChatLanguageModel complexChatModel() {
-        return GoogleAiGeminiChatModel.builder()
+    public StreamingChatLanguageModel complexChatModel() {
+        return GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(complexTierModelName)
                 .build();
