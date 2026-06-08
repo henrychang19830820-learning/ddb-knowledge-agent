@@ -32,7 +32,23 @@ public class ChatModelAuditListener implements ChatModelListener {
     }
 
     @Override
-    public void onResponse(ChatModelResponseContext responseContext) {}
+    public void onResponse(ChatModelResponseContext responseContext) {
+        if (responseContext.response() != null && responseContext.response().aiMessage() != null) {
+            List<ToolExecutionRequest> toolRequests = responseContext.response().aiMessage().toolExecutionRequests();
+            if (toolRequests != null && !toolRequests.isEmpty()) {
+                AuditContext context = AuditContextHolder.get();
+                if (context != null) {
+                    for (ToolExecutionRequest req : toolRequests) {
+                        Map<String, Object> exec = new HashMap<>();
+                        exec.put("id", req.id());
+                        exec.put("name", req.name());
+                        exec.put("arguments", req.arguments());
+                        context.getToolExecutions().add(exec);
+                    }
+                }
+            }
+        }
+    }
 
     @Override
     public void onError(ChatModelErrorContext errorContext) {}
