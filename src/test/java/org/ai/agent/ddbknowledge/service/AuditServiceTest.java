@@ -19,7 +19,6 @@ class AuditServiceTest {
     void setUp() {
         jdbcTemplate = mock(JdbcTemplate.class);
         pricingConfig = mock(PricingConfig.class);
-        // This will fail to compile initially because AuditService doesn't exist
         auditService = new AuditService(jdbcTemplate, pricingConfig);
     }
 
@@ -55,6 +54,7 @@ class AuditServiceTest {
         verify(jdbcTemplate).update(
                 anyString(),
                 eq("Test query"),
+                isNull(), // full_prompt
                 eq("test-model"),
                 eq(1500),
                 eq(500),
@@ -65,13 +65,14 @@ class AuditServiceTest {
                 eq(150L),
                 eq(200L),
                 eq(false),
-                isNull(),
-                isNull() // complexity_score
+                isNull(), // trace_id
+                isNull(), // complexity_score
+                isNull()  // tool_calls
         );
-        }
+    }
 
-        @Test
-        void testRecordAudit_IncludesTraceId() {
+    @Test
+    void testRecordAudit_IncludesTraceId() {
         // Setup mock pricing
         PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
         price.setInputPricePer1m(0.10);
@@ -94,6 +95,7 @@ class AuditServiceTest {
         verify(jdbcTemplate).update(
                 contains("trace_id"),
                 eq("Test query"),
+                isNull(), // full_prompt
                 eq("test-model"),
                 eq(1000),
                 eq(1000),
@@ -105,12 +107,13 @@ class AuditServiceTest {
                 anyLong(),
                 anyBoolean(),
                 eq(java.util.UUID.fromString(traceId)),
-                isNull() // complexity_score
+                isNull(), // complexity_score
+                isNull()  // tool_calls
         );
-        }
+    }
 
-        @Test
-        void testPrefixModelMatching() {
+    @Test
+    void testPrefixModelMatching() {
         // Setup mock pricing for base model (sanitized key)
         PricingConfig.ModelPrice price = new PricingConfig.ModelPrice();
         price.setInputPricePer1m(0.10);
@@ -133,6 +136,7 @@ class AuditServiceTest {
         verify(jdbcTemplate).update(
                 anyString(),
                 eq("Prefix query"),
+                isNull(), // full_prompt
                 eq("gemini-3.1-flash-lite-preview"),
                 eq(1000),
                 eq(1000),
@@ -143,9 +147,9 @@ class AuditServiceTest {
                 anyLong(),
                 anyLong(),
                 anyBoolean(),
-                isNull(),
-                isNull() // complexity_score
+                isNull(), // trace_id
+                isNull(), // complexity_score
+                isNull()  // tool_calls
         );
-        }
-
-        }
+    }
+}

@@ -16,4 +16,5 @@ public class AuditRecord {
     private boolean isCacheHit;
     private String traceId;
     private Integer complexityScore;
+    private String toolCallsJson;
 }
