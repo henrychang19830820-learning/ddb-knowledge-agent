@@ -52,6 +52,9 @@ public class QueryRoutingService {
     @Value("${agent.routing.complex-tier-model}")
     private String complexTierModelName;
 
+    interface Assistant {
+        dev.langchain4j.service.Result<String> chat(String message);
+    }
 
     public QueryRoutingService(ModelRoutingService modelRoutingService,
                               @Qualifier("simpleChatModel") ChatLanguageModel simpleChatModel,
@@ -71,13 +74,9 @@ public class QueryRoutingService {
         this.auditService = auditService;
     }
 
-    interface Assistant {
-        dev.langchain4j.service.Result<String> chat(String message);
-    }
-
     public void askStreaming(String query, StreamingResponseHandler<AiMessage> handler) {
         String traceId = UUID.randomUUID().toString();
-        log.info("Processing streaming query [traceId={}]: {}", traceId, query);
+        log.info("Processing streaming request [traceId={}]: {}", traceId, query);
         long startTime = System.nanoTime();
 
         // 1. Generate Query Embedding (Needed for cache)
@@ -133,7 +132,6 @@ public class QueryRoutingService {
         
         log.info("Selected model {} [traceId={}] with score {}", selectedModelName, traceId, complexityScore);
 
-        // 5. Generate Answer (Streaming with ReAct)
         String systemPrompt = "You are a DynamoDB expert. " +
                 "You have access to a tool to search the official documentation. You should use it to look up specific technical details. " +
                 "You may use your own training data to answer, but you MUST explicitly mention in your answer what information comes from the documentation context and what comes from your model training data. " +
@@ -147,7 +145,7 @@ public class QueryRoutingService {
                 .build();
 
         try {
-            log.info("Starting ReAct loop for query [traceId={}]", traceId);
+            log.info("Starting ReAct loop [traceId={}]", traceId);
             dev.langchain4j.service.Result<String> result = assistant.chat(query);
             log.info("ReAct loop completed [traceId={}]", traceId);
             
@@ -156,25 +154,31 @@ public class QueryRoutingService {
             int inputTokens = result.tokenUsage() != null ? result.tokenUsage().inputTokenCount() : 0;
             int outputTokens = result.tokenUsage() != null ? result.tokenUsage().outputTokenCount() : 0;
 
+            // Log TTFT as total reasoning time for ReAct (since nothing streams until reasoning finishes)
             auditService.recordAudit(AuditRecord.builder()
                     .queryText(query)
                     .modelName(selectedModelName)
                     .inputTokens(inputTokens)
                     .outputTokens(outputTokens)
-                    .ttftMs(totalLatency) // No true TTFT since non-streaming
+                    .ttftMs(totalLatency) 
                     .totalLatencyMs(totalLatency)
                     .isCacheHit(false)
                     .traceId(traceId)
                     .complexityScore(complexityScore)
                     .build());
 
-            log.info("Updating semantic cache with new answer [traceId={}]", traceId);
+            log.info("Updating semantic cache [traceId={}]", traceId);
             Metadata metadata = new Metadata();
             metadata.put("original_query", query);
             cacheStore.add(queryEmbedding, TextSegment.from(answer, metadata));
 
-            // Send the complete answer to the streaming handler in one go
-            handler.onNext(answer);
+            // Manually stream words to maintain UI responsiveness
+            String[] tokens = answer.split("(?<=\\s)|(?=\\n)");
+            for (String token : tokens) {
+                handler.onNext(token);
+                try { Thread.sleep(10); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+            
             handler.onComplete(Response.from(AiMessage.from(answer), result.tokenUsage(), dev.langchain4j.model.output.FinishReason.STOP));
 
         } catch (Exception error) {

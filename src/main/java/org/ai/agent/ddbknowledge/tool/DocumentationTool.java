@@ -20,8 +20,9 @@ public class DocumentationTool {
 
     @Tool("Search the official Amazon DynamoDB documentation. Use this to look up specific APIs, configurations, best practices, and internal workings of DynamoDB.")
     public String searchDocumentation(String query) {
-        log.info("Tool execution: searchDocumentation for query '{}'", query);
+        log.info("TOOL_START: searchDocumentation for query '{}'", query);
         List<EmbeddingMatch<TextSegment>> matches = hybridSearchService.search(query, 5);
+        log.info("TOOL_END: Found {} matches for query '{}'", matches.size(), query);
         if (matches.isEmpty()) {
             return "No relevant documentation found for the query.";
         }

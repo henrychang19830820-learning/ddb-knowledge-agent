@@ -57,6 +57,7 @@ public class ModelRoutingService {
                     .modelName(classifierModelName)
                     .inputTokens(response.tokenUsage().inputTokenCount())
                     .outputTokens(response.tokenUsage().outputTokenCount())
+                    .ttftMs(duration)
                     .totalLatencyMs(duration)
                     .traceId(traceId)
                     .complexityScore(score)
