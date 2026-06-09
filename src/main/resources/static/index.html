@@ -147,6 +147,60 @@
             border-radius: 0.2rem;
             font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
         }
+
+        footer {
+            background-color: var(--chat-bg);
+            padding: 1.5rem;
+            display: flex;
+            gap: 1rem;
+            border-top: 1px solid var(--border);
+            z-index: 10;
+        }
+
+        #question-input {
+            flex: 1;
+            padding: 0.8rem 1.2rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #question-input:focus {
+            border-color: var(--user-bubble);
+        }
+
+        #send-btn {
+            background-color: var(--user-bubble);
+            color: white;
+            border: none;
+            padding: 0 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+
+        #send-btn:hover {
+            opacity: 0.9;
+        }
+
+        #send-btn:disabled {
+            background-color: var(--text-light);
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .typing {
+            font-style: italic;
+            color: var(--text-light);
+        }
     </style>
 </head>
 <body>
