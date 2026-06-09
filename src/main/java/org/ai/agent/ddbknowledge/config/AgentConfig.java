@@ -105,7 +105,10 @@ public class AgentConfig {
                 .dimension(384)
                 .metadataStorageConfig(DefaultMetadataStorageConfig.builder()
                         .storageMode(MetadataStorageMode.COLUMN_PER_KEY)
-                        .columnDefinitions(java.util.Collections.singletonList("original_query TEXT"))
+                        .columnDefinitions(java.util.Arrays.asList(
+                            "original_query TEXT",
+                            "detected_entities TEXT"
+                        ))
                         .build())
                 .build();
     }
