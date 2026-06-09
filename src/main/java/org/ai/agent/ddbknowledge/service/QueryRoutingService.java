@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.ai.agent.ddbknowledge.audit.AuditContext;
 import org.ai.agent.ddbknowledge.audit.AuditContextHolder;
 import org.ai.agent.ddbknowledge.dto.AuditRecord;
+import org.ai.agent.ddbknowledge.guardrail.EntityMatcher;
 import org.ai.agent.ddbknowledge.tool.DocumentationTool;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,8 @@ public class QueryRoutingService {
     private final EmbeddingStore<TextSegment> cacheStore;
     private final DocumentationTool documentationTool;
     private final AuditService auditService;
+    private final EntityGuardrailService entityGuardrailService;
+    private final EntityMatcher entityMatcher;
 
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
@@ -64,7 +67,9 @@ public class QueryRoutingService {
                               EmbeddingModel embeddingModel,
                               @Qualifier("cacheStore") EmbeddingStore<TextSegment> cacheStore,
                               DocumentationTool documentationTool,
-                              AuditService auditService) {
+                              AuditService auditService,
+                              EntityGuardrailService entityGuardrailService,
+                              EntityMatcher entityMatcher) {
         this.modelRoutingService = modelRoutingService;
         this.simpleChatModel = simpleChatModel;
         this.mediumChatModel = mediumChatModel;
@@ -73,6 +78,8 @@ public class QueryRoutingService {
         this.cacheStore = cacheStore;
         this.documentationTool = documentationTool;
         this.auditService = auditService;
+        this.entityGuardrailService = entityGuardrailService;
+        this.entityMatcher = entityMatcher;
     }
 
     interface Assistant {
@@ -103,25 +110,33 @@ public class QueryRoutingService {
                 List<EmbeddingMatch<TextSegment>> cacheMatches = cacheStore.search(cacheSearchRequest).matches();
 
                 if (!cacheMatches.isEmpty()) {
-                    log.info("CACHE_HIT [traceId={}]: Found similar query with score {}", traceId, cacheMatches.get(0).score());
-                    String cachedAnswer = cacheMatches.get(0).embedded().text();
-                    
-                    long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
-                    auditService.recordAudit(AuditRecord.builder()
-                            .queryText(query)
-                            .fullPrompt("CACHE_HIT")
-                            .modelName(simpleTierModelName)
-                            .inputTokens(0)
-                            .outputTokens(0)
-                            .ttftMs(totalLatency)
-                            .totalLatencyMs(totalLatency)
-                            .isCacheHit(true)
-                            .traceId(traceId)
-                            .build());
-                    
-                    handler.onNext(cachedAnswer);
-                    handler.onComplete(Response.from(AiMessage.from(cachedAnswer)));
-                    return;
+                    TextSegment match = cacheMatches.get(0).embedded();
+                    String cachedAnswer = match.text();
+                    String cachedQuery = match.metadata().getString("original_query");
+                    String cachedEntities = match.metadata().getString("detected_entities");
+
+                    if (entityGuardrailService.isValid(query, cachedQuery, cachedEntities)) {
+                        log.info("CACHE_HIT_VALIDATED [traceId={}]: Score {}", traceId, cacheMatches.get(0).score());
+                        
+                        long totalLatency = (System.nanoTime() - startTime) / 1_000_000;
+                        auditService.recordAudit(AuditRecord.builder()
+                                .queryText(query)
+                                .fullPrompt("CACHE_HIT")
+                                .modelName(simpleTierModelName)
+                                .inputTokens(0)
+                                .outputTokens(0)
+                                .ttftMs(totalLatency)
+                                .totalLatencyMs(totalLatency)
+                                .isCacheHit(true)
+                                .traceId(traceId)
+                                .build());
+                        
+                        handler.onNext(cachedAnswer);
+                        handler.onComplete(Response.from(AiMessage.from(cachedAnswer)));
+                        return;
+                    } else {
+                        log.warn("CACHE_HIT_REJECTED [traceId={}]: Semantic drift detected via guardrail", traceId);
+                    }
                 }
 
                 log.info("CACHE_MISS [traceId={}]: Proceeding to ReAct loop", traceId);
@@ -219,6 +234,7 @@ String systemPrompt = """
                             log.info("Updating semantic cache with new answer [traceId={}]", traceId);
                             Metadata metadata = new Metadata();
                             metadata.put("original_query", query);
+                            metadata.put("detected_entities", String.join(",", entityMatcher.extractEntities(query)));
                             cacheStore.add(queryEmbedding, TextSegment.from(fullResponse.toString(), metadata));
 
                             handler.onComplete(Response.from(dev.langchain4j.data.message.AiMessage.from(fullResponse.toString()), response.tokenUsage(), response.finishReason()));
