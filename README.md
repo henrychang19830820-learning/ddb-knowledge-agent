@@ -1,6 +1,6 @@
 # DDB Knowledge Agent
 
-A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a high-speed **Semantic Cache**, an intelligent **Model Router**, and a **ReAct Reasoning Loop** that decides when to search official documentation via **Hybrid Search (Vector + FTS)**.
+A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a high-speed **Semantic Cache** with **Entity-Match Guardrails**, an intelligent **Model Router**, and a **ReAct Reasoning Loop** that decides when to search official documentation via **Hybrid Search (Vector + FTS)**.
 
 ## 🏗 System Architecture
 
@@ -22,7 +22,7 @@ A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a 
                          │  └──────┬───────────┘      └────────────┬─────────────┘  │      │                           │
                                    │                               │                │      │ 1. ddb_knowledge_chunks   │
                          │  ┌──────v───────────┐      ┌────────────v─────────────┐  │      │ 2. ddb_semantic_cache     │
-                         │  │   AuditService   │ <──> │      EmbeddingStore      │  │ <──> │ 3. request_audit_logs     │
+                         │  │   AuditService   │ <──> │   EntityGuardrailService │  │ <──> │ 3. request_audit_logs     │
                          │  └──────────────────┘      └──────────────────────────┘  │      └───────────────────────────┘
                          └──────────────────────────────────────────────────────────┘
 ```
@@ -33,11 +33,23 @@ A local-first, **3-Tier Hybrid ReAct Agent** for Amazon DynamoDB. It features a 
        USER QUESTION
              │
              v
-   ┌───────────────────┐        YES       ┌───────────────────┐
-   │  Semantic Cache   ├─────────────────>│  Return Answer    │
-   │      Check        │                  │   (Latency <10ms) │
-   └─────────┬─────────┘                  └───────────────────┘
-             │ NO (Cache Miss)
+   ┌───────────────────┐
+   │  Semantic Cache   │ Search pgvector (Threshold 0.92)
+   │      Check        │
+   └─────────┬─────────┘
+             │ YES (Similarity Hit)
+             v
+   ┌───────────────────┐         NO        ┌───────────────────┐
+   │ Hybrid Guardrail  ├──────────────────>│   Proceed to      │
+   │ (Regex + LLM)     │                   │   Model Routing   │
+   └─────────┬─────────┘                   └───────────────────┘
+             │ YES (Validated)
+             v
+   ┌───────────────────┐
+   │  Return Answer    │ (Latency <10ms for Exact Match)
+   │   (Validated)     │
+   └───────────────────┘
+             │ NO (Cache Miss / Drift Rejected)
              v
    ┌───────────────────┐
    │ Dynamic Routing   │ Evaluate Complexity (1-10)
@@ -123,10 +135,15 @@ Ask the same question again; it will hit the cache (< 10ms):
 curl -N "http://localhost:8090/ask-stream?question=How+to+setup+a+GSI%3F"
 ```
 
+### Advanced Test Cases
+For detailed testing of Model Routing and Guardrails, see [testcases.md](testcases.md).
+
 ## 🛠 Hybrid ReAct Architecture
 The agent leverages LangChain4j `AiServices` to provide an autonomous reasoning loop.
 
-1.  **Semantic Cache**: Intercepts queries with >0.92 similarity to previously answered questions.
+1.  **Semantic Cache + Hybrid Guardrail**: Intercepts queries with >0.92 similarity.
+    *   **Tier 1 (Regex)**: Instant verification of DynamoDB entities (`GSI`, `PutItem`, etc.).
+    *   **Tier 2 (LLM)**: Fallback to verify synonym equivalence (e.g., "PK" vs "Partition Key") using `gemini-3.1-flash-lite`.
 2.  **Model Routing**: Evaluates query complexity (1-10) and routes to the optimal tier:
     *   **Simple (1-3)**: `gemini-3.1-flash-lite` (Fast/Cheap)
     *   **Medium (4-6)**: `gemini-2.5-flash`
@@ -137,7 +154,7 @@ The agent leverages LangChain4j `AiServices` to provide an autonomous reasoning 
 ## 📊 Database Management & Auditing
 Use **pgweb** at [http://localhost:5433](http://localhost:5433) to inspect:
 * `ddb_knowledge_chunks`: Stores vectorized documentation with `tsvector` support.
-* `ddb_semantic_cache`: Stores previously generated high-quality answers.
+* `ddb_semantic_cache`: Stores previously generated high-quality answers with `detected_entities`.
 * `request_audit_logs`: Detailed tracking of every model call, including:
     * `trace_id`: Links multiple model calls (Routing + Generation) in a single request.
     * `complexity_score`: The 1-10 score that determined the model tier.
