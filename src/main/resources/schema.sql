@@ -28,6 +28,7 @@ DROP TABLE IF EXISTS ddb_semantic_cache;
 CREATE TABLE ddb_semantic_cache (
     embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     original_query TEXT,
+    detected_entities TEXT,
     text TEXT,
     embedding VECTOR(384),
     metadata JSONB,
