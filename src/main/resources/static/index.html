@@ -281,14 +281,23 @@
 
         let currentRawResponse = '';
 
+        // Render AI markdown, then make Sources citation links open in a new tab.
+        function renderAiMarkdown(container, text) {
+            container.innerHTML = marked.parse(text);
+            container.querySelectorAll('a[href^="/sources/"]').forEach(a => {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+            });
+        }
+
         function addMessage(text, isUser = false, isError = false) {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${isUser ? 'user-message' : 'ai-message'} ${isError ? 'error-message' : ''}`;
-            
+
             if (isUser || isError) {
                 msgDiv.innerText = text;
             } else {
-                msgDiv.innerHTML = marked.parse(text);
+                renderAiMarkdown(msgDiv, text);
             }
             
             chatContainer.appendChild(msgDiv);
@@ -331,7 +340,7 @@
                 
                 currentRawResponse += tokenText;
                 
-                aiMsgDiv.innerHTML = marked.parse(currentRawResponse);
+                renderAiMarkdown(aiMsgDiv, currentRawResponse);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             });
 
