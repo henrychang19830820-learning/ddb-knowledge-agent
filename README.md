@@ -100,8 +100,16 @@ docker-compose down
 * **Database UI:** [http://localhost:5433](http://localhost:5433)
 
 ### 2. Configure Environment
-Export your Gemini API Key:
+Provide your Gemini API Key using **either** option:
 
+**Option A — local `.env` file (recommended, picked up automatically):**
+```bash
+cp .env.example .env
+# then edit .env and set GOOGLE_API_KEY=...
+```
+The app loads `.env` automatically via `spring.config.import` in `application.yml`. The file is gitignored, so your key never gets committed.
+
+**Option B — export an environment variable (per shell session):**
 ```bash
 export GOOGLE_API_KEY=your_gemini_api_key_here
 ```

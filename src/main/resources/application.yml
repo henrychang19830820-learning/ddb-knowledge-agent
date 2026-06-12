@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: ddb-knowledge-agent
+  # Optionally load secrets (e.g. GOOGLE_API_KEY) from a local, gitignored .env file.
+  # The [.properties] suffix parses the extensionless file as key=value pairs.
+  # Missing file is fine ("optional:") — OS environment variables still work.
+  config:
+    import: "optional:file:.env[.properties]"
   datasource:
     url: jdbc:postgresql://localhost:5432/ddb_agent
     username: user
