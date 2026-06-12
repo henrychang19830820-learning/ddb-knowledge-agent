@@ -25,16 +25,28 @@ public class DocumentationTool {
         log.info("TOOL_END: Found {} matches for query '{}'", matches.size(), query);
         
         String result;
+        org.ai.agent.ddbknowledge.audit.AuditContext context =
+                org.ai.agent.ddbknowledge.audit.AuditContextHolder.get();
+
         if (matches.isEmpty()) {
             result = "No relevant documentation found for the query.";
         } else {
             result = matches.stream()
-                    .map(match -> match.embedded().text())
+                    .map(match -> {
+                        String fileName = match.embedded().metadata().getString("file_name");
+                        String text = match.embedded().text();
+                        if (fileName == null || fileName.isBlank()) {
+                            return text;
+                        }
+                        if (context != null) {
+                            context.addRetrievedSource(fileName);
+                        }
+                        return "[Source: " + fileName + "]\n" + text;
+                    })
                     .collect(Collectors.joining("\n\n"));
         }
 
         // Directly record execution to AuditContext for high-fidelity logs
-        org.ai.agent.ddbknowledge.audit.AuditContext context = org.ai.agent.ddbknowledge.audit.AuditContextHolder.get();
         if (context != null) {
             context.addToolExecution("searchDocumentation", query, result);
         }
