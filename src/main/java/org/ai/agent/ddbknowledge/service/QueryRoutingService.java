@@ -40,6 +40,7 @@ public class QueryRoutingService {
     private final AuditService auditService;
     private final EntityGuardrailService entityGuardrailService;
     private final EntityMatcher entityMatcher;
+    private final SourceCitationFormatter sourceCitationFormatter;
 
     @Value("${agent.cache.semantic-threshold:0.92}")
     private double cacheThreshold;
@@ -69,7 +70,8 @@ public class QueryRoutingService {
                               DocumentationTool documentationTool,
                               AuditService auditService,
                               EntityGuardrailService entityGuardrailService,
-                              EntityMatcher entityMatcher) {
+                              EntityMatcher entityMatcher,
+                              SourceCitationFormatter sourceCitationFormatter) {
         this.modelRoutingService = modelRoutingService;
         this.simpleChatModel = simpleChatModel;
         this.mediumChatModel = mediumChatModel;
@@ -80,6 +82,7 @@ public class QueryRoutingService {
         this.auditService = auditService;
         this.entityGuardrailService = entityGuardrailService;
         this.entityMatcher = entityMatcher;
+        this.sourceCitationFormatter = sourceCitationFormatter;
     }
 
     interface Assistant {
@@ -167,6 +170,7 @@ String systemPrompt = """
 
         ### 📚 From Official Documentation
         [Provide information found ONLY using the search tool here. If the tool returned no results, state "No specific documentation found for this query."]
+        When you use information from the search tool, reference the source document's filename in your answer. Each tool result chunk is prefixed with its source as [Source: <filename>]; mention that exact filename (e.g. WorkingWithDynamo.md) when you rely on its content.
 
         ### 🧠 From Expert Knowledge
         [Provide supplementary information from your own training data here to give a more complete or practical answer.]
@@ -230,6 +234,15 @@ String systemPrompt = """
                                     .complexityScore(complexityScore)
                                     .toolCallsJson(toolCallsJson)
                                     .build());
+
+                            // Append the Sources footer (cited vs. retrieved) before caching,
+                            // so cached answers retain it. Stream it to the live client too.
+                            String sourcesFooter = sourceCitationFormatter.format(
+                                    auditContext.getRetrievedSources(), fullResponse.toString());
+                            if (!sourcesFooter.isEmpty()) {
+                                handler.onNext(sourcesFooter);
+                                fullResponse.append(sourcesFooter);
+                            }
 
                             log.info("Updating semantic cache with new answer [traceId={}]", traceId);
                             Metadata metadata = new Metadata();
