@@ -162,3 +162,15 @@ Use **pgweb** at [http://localhost:5433](http://localhost:5433) to inspect:
     * `tool_calls`: JSON array of every documentation search performed (query + results).
     * `total_cost`: Accurate USD cost calculation based on latest Gemini rates.
     * `ttft_ms`: **Real physical Time To First Token** arrival.
+
+### Source Citations
+
+Answers that draw on the ingested documentation end with a **Sources** footer listing every
+document retrieved for the request:
+
+- ✅ `cited` — the model referenced the filename in its answer.
+- 📄 `retrieved` — pulled by search but not referenced.
+
+Each entry links to `/sources/<file_name>`, which serves the raw markdown of that doc from the
+ingest docs-path (`agent.ingest.docs-path`, default `local_test_docs`) as `text/plain`. The
+footer is generated on a cache miss and stored with the answer, so cached responses keep it.
