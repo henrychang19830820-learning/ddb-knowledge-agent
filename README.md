@@ -162,3 +162,52 @@ Use **pgweb** at [http://localhost:5433](http://localhost:5433) to inspect:
     * `tool_calls`: JSON array of every documentation search performed (query + results).
     * `total_cost`: Accurate USD cost calculation based on latest Gemini rates.
     * `ttft_ms`: **Real physical Time To First Token** arrival.
+
+### Source Citations
+
+Answers that draw on the ingested documentation end with a **Sources** footer listing every
+document retrieved for the request:
+
+- ✅ `cited` — the model referenced the filename in its answer.
+- 📄 `retrieved` — pulled by search but not referenced.
+
+Each entry links to `/sources/<file_name>`, which serves the raw markdown of that doc from the
+ingest docs-path (`agent.ingest.docs-path`, default `local_test_docs`) as `text/plain`. The
+footer is generated on a cache miss and stored with the answer, so cached responses keep it.
+
+## 🧹 Resetting & Cleaning Data
+
+By default your data **persists**. The schema (`src/main/resources/schema.sql`) is idempotent (`CREATE TABLE IF NOT EXISTS`, no `DROP`), so restarting the app or running `docker-compose down` (without `-v`) keeps everything in the `postgres_data` volume. Clean data manually only when you actually need to.
+
+### Clear specific data via the API
+Targeted resets without touching the schema:
+
+```bash
+# Clear the knowledge base (ddb_knowledge_chunks) — e.g. before re-ingesting docs
+curl -X DELETE "http://localhost:8090/docs"
+
+# Clear the semantic cache (ddb_semantic_cache) — e.g. to force fresh answers
+curl -X DELETE "http://localhost:8090/cache"
+```
+
+### Truncate tables directly
+To empty a table (including `request_audit_logs`, which has no API endpoint) while keeping the schema:
+
+```bash
+docker compose exec postgres psql -U user -d ddb_agent \
+  -c "TRUNCATE request_audit_logs;"
+```
+
+### Full reset (required for schema migrations)
+Because the schema is idempotent, **editing an existing `CREATE TABLE` in `schema.sql` will NOT alter an already-existing table** — the change is silently skipped. When you change a table's structure, choose one of:
+
+* **Non-destructive (keeps data):** add an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` statement to `schema.sql`. Applied automatically on the next app start.
+* **Destructive rebuild (wipes data):** drop the Postgres volume and let `schema.sql` recreate everything from scratch:
+
+  ```bash
+  docker-compose down -v   # the -v flag deletes the postgres_data volume
+  docker-compose up -d
+  ./gradlew bootRun        # recreates tables from schema.sql
+  ```
+
+  Then re-populate the knowledge base with `curl -X POST "http://localhost:8090/ingest"`.
